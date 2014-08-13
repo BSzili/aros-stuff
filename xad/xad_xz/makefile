@@ -11,7 +11,7 @@ else
     CFLAGS += -O2 -DNDEBUG
 endif
 
-LDFLAGS = -nostartfiles
+LDFLAGS = -L. -llzma -nostartfiles
 
 ifeq ($(OSTYPE),Morphos)
 	LDFLAGS += -noixemul
@@ -70,6 +70,8 @@ OBJ = \
 	extheader.o \
 	xz.o
 
+all: liblzma.a xz
+
 lzma/liblzma/check/%.o: lzma/liblzma/check/%.c
 	$(CC) $(CFLAGS) -std=c99 -c $^ -o $@
 
@@ -88,7 +90,10 @@ lzma/liblzma/rangecoder/%.o: lzma/liblzma/rangecoder/%.c
 lzma/liblzma/simple/%.o: lzma/liblzma/simple/%.c
 	$(CC) $(CFLAGS) -std=c99 -c $^ -o $@
 
-xz: $(OBJ) $(LZMA_OBJ)
+liblzma.a: $(LZMA_OBJ)
+	$(AR) rcs $@ $?
+
+xz: $(OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
 clean:
