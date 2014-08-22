@@ -23,21 +23,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <dos/dostags.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
-#include <proto/alib.h>
-#ifdef __AROS__
-#include <aros/debug.h>
-#else
-#include <clib/debug_protos.h>
-#ifdef DEBUG
-#define D(x) x
-#else
-#define D(x)
-#endif
-#define bug kprintf
-#endif
+#include <clib/alib_protos.h>
+#include "debug.h"
 #include "dll.h"
 #include "dll_intern.h"
 

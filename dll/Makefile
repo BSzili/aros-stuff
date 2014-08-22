@@ -9,6 +9,10 @@ ifeq ($(OSTYPE), MorphOS)
 CFLAGS += -noixemul
 endif
 
+ifeq ($(OSTYPE), AmigaOS)
+CFLAGS += -D__USE_INLINE__ -Wno-deprecated-declarations
+endif
+
 ifeq ($(DEBUG),1)
 CFLAGS += -g -DDEBUG
 else

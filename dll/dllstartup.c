@@ -23,13 +23,8 @@
 
 #include <string.h>
 #include <proto/exec.h>
-#include <proto/alib.h>
-#ifdef __AROS__
-#include <aros/debug.h>
-#else
-#define D(x)
-#define bug(x)
-#endif
+#include <clib/alib_protos.h>
+#include "debug.h"
 #include "dll.h"
 #include "dll_intern.h"
 

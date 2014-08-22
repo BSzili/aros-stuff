@@ -14,7 +14,7 @@ EXE = $(EXEOBJS:.o=.exe)
 DLL = $(DLLOBJS:.o=.dll)
 
 
-CFLAGS = -Wall -Wno-strict-aliasing
+CFLAGS = -Wall -Wno-strict-aliasing -I..
 
 ifeq ($(DEBUG),1)
 CFLAGS += -g -DDEBUG
@@ -22,7 +22,7 @@ else
 CFLAGS += -O2
 endif
 
-LDFLAGS = -ldll -lstdc++
+LDFLAGS = -L.. -ldll -lstdc++
 
 ifeq ($(OSTYPE), MorphOS)
 CFLAGS += -noixemul
