@@ -31,6 +31,7 @@
 #include "debug.h"
 
 #define FALLBACKSIGNAL SIGBREAKB_CTRL_E
+#define NAMELEN 64
 
 struct cond_waiter
 {
@@ -50,7 +51,8 @@ typedef struct
 	void *ret;
 	jmp_buf jmp;
 	const pthread_attr_t *attr;
-	char name[256];
+	//char name[256];
+	//size_t oldlen;
 } ThreadInfo;
 
 // TODO: make this a list
@@ -287,6 +289,8 @@ static void StarterFunc(void)
 	D(bug("%s()\n", __FUNCTION__));
 
 	inf = (ThreadInfo *)FindTask(NULL)->tc_UserData;
+	// trim the name
+	//inf->process->pr_Task.tc_Node.ln_Name[inf->oldlen];
 
 	if (!setjmp(inf->jmp))
 		inf->ret = inf->start(inf->arg);
@@ -300,6 +304,9 @@ static void StarterFunc(void)
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)(void *), void *arg)
 {
 	ThreadInfo *inf;
+	char buf[NAMELEN];
+	char name[NAMELEN];
+	size_t oldlen;
 
 	D(bug("%s(%p, %p, %p, %p)\n", __FUNCTION__, thread, attr, start, arg));
 
@@ -310,14 +317,17 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	inf->start = start;
 	inf->attr = attr;
 	inf->arg = arg;
-	snprintf(inf->name, sizeof(inf->name), "pthread thread #%d", nextid);
+
+	// let's trick CreateNewProc into allocating a larger buffer for the name
+	snprintf(buf, sizeof(buf), "pthread thread #%d", nextid);
+	oldlen = strlen(buf);
+	memset(name, ' ', sizeof(name));
+	memcpy(name, buf, oldlen);
+	name[sizeof(name) - 1] = '\0';
 
 	inf->msgport = CreateMsgPort();
 	if (!inf->msgport)
-	{
-		free(inf);
 		return EAGAIN;
-	}
 
 	inf->msg.mn_Node.ln_Type = NT_MESSAGE;
 	inf->msg.mn_ReplyPort = inf->msgport;
@@ -332,17 +342,18 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 #endif
 		NP_UserData, inf,
 		(attr) ? NP_Priority : TAG_IGNORE, attr->param.sched_priority,
-		NP_Name, inf->name,
+		NP_Name, name,
 		TAG_DONE);
 
 	if (!inf->process)
 	{
 		DeleteMsgPort(inf->msgport);
-		free(inf);
 		return EAGAIN;
 	}
 
-	return nextid++;
+	*thread = nextid++;
+
+	return 0;
 }
 
 int pthread_join(pthread_t thread, void **value_ptr)
@@ -425,15 +436,17 @@ int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param
 int pthread_setname_np(pthread_t thread, const char *name)
 {
 	ThreadInfo *inf;
+	char *currentName;
 
 	D(bug("%s(%u, %s)\n", __FUNCTION__, thread, name));
 
 	inf = GetThreadInfo(thread);
+	currentName = inf->process->pr_Task.tc_Node.ln_Name;
 
-	if (strlen(name) + 1 > sizeof(inf->name))
+	if (strlen(name) + 1 > NAMELEN)
 		return ERANGE;
 
-	strncpy(inf->name, name, sizeof(inf->name));
+	strncpy(currentName, name, NAMELEN);
 
 	return 0;
 }
@@ -441,15 +454,17 @@ int pthread_setname_np(pthread_t thread, const char *name)
 int pthread_getname_np(pthread_t thread, char *name, size_t len)
 {
 	ThreadInfo *inf;
+	char *currentName;
 
 	D(bug("%s(%u, %p, %u)\n", __FUNCTION__, thread, name, len));
 
 	inf = GetThreadInfo(thread);
+	currentName = inf->process->pr_Task.tc_Node.ln_Name;
 
-	if (strlen(inf->name) + 1 > len)
+	if (strlen(currentName) + 1 > len)
 		return ERANGE;
 	// TODO: partially copy the name?
-	strncpy(name, inf->name, len);
+	strncpy(name, currentName, len);
 
 	return 0;
 }
