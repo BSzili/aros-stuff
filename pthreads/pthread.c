@@ -246,6 +246,8 @@ int pthread_attr_init(pthread_attr_t *attr)
 
 	memset(attr, 0, sizeof(pthread_attr_t));
 	// TODO: sensible defaults?
+
+	return 0;
 }
 
 int pthread_attr_destroy(pthread_attr_t *attr)
@@ -256,6 +258,8 @@ int pthread_attr_destroy(pthread_attr_t *attr)
 		return EINVAL;
 
 	memset(attr, 0, sizeof(pthread_attr_t));
+
+	return 0;
 }
 
 int pthread_attr_setschedparam(pthread_attr_t *attr, const struct sched_param *param)
@@ -266,6 +270,8 @@ int pthread_attr_setschedparam(pthread_attr_t *attr, const struct sched_param *p
 		return EINVAL;
 
 	attr->param = *param;
+
+	return 0;
 }
 
 //
@@ -421,7 +427,7 @@ int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param
 
 	D(bug("%s(%u, %d, %p)\n", __FUNCTION__, thread, policy, param));
 
-	if (param = NULL)
+	if (param == NULL)
 		return EINVAL;
 
 	inf = GetThreadInfo(thread);

@@ -48,4 +48,6 @@ int sched_yield(void)
 
 	oldPrio = SetTaskPri(FindTask(NULL), -10);
 	SetTaskPri(FindTask(NULL), oldPrio);
+
+	return 0;
 }
