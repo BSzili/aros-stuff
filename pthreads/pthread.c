@@ -18,11 +18,11 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+//#include <exec/lists.h>
 #include <clib/alib_protos.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 
-#include <errno.h>
 #include <setjmp.h>
 #include <string.h>
 #include <stdio.h>
@@ -42,6 +42,21 @@ struct cond_waiter
 
 typedef struct
 {
+	void *value;
+	void (*destructor)(void *);
+	BOOL used;
+} TLSKey;
+
+typedef struct
+{
+	struct MinNode node;
+	void (*routine)(void *);
+	void *arg;
+} CleanupHandler;
+
+
+typedef struct
+{
 	void *(*start)(void *);
 	void *arg;
 	struct MsgPort *msgport;
@@ -53,13 +68,18 @@ typedef struct
 	const pthread_attr_t *attr;
 	//char name[256];
 	//size_t oldlen;
+	TLSKey tls[PTHREAD_KEYS_MAX];
+	struct MinList cleanup;
 } ThreadInfo;
 
 // TODO: make this a list
 static ThreadInfo threads[PTHREAD_THREADS_MAX];
 static pthread_t nextid = 0;
 
-// helper functions
+//
+// Helper functions
+//
+
 static int SemaphoreIsInvalid(struct SignalSemaphore *sem)
 {
 	return (!sem || sem->ss_Link.ln_Type != NT_SIGNALSEM || sem->ss_WaitQueue.mlh_Tail != NULL);
@@ -67,9 +87,155 @@ static int SemaphoreIsInvalid(struct SignalSemaphore *sem)
 
 static ThreadInfo *GetThreadInfo(pthread_t thread)
 {
-	ThreadInfo *inf;
-	inf = &threads[thread];
+	ThreadInfo *inf = NULL;
+
+	if (thread < nextid)
+		inf = &threads[thread];
+
 	return inf;
+}
+
+static pthread_t GetThreadId(struct Task *task)
+{
+	pthread_t i;
+
+	for (i = 0; i < PTHREAD_THREADS_MAX; i++)
+	{
+		if ((struct Task *)threads[i].process == task)
+			break;
+	}
+
+	// TODO: error handling?
+
+	return i;
+}
+
+//
+// Thread specific data functions
+//
+
+int pthread_key_create(pthread_key_t *key, void (*destructor)(void *))
+{
+	pthread_t thread;
+	ThreadInfo *inf;
+	TLSKey *tls;
+	int i;
+
+	D(bug("%s(%p, %p)\n", __FUNCTION__, key, destructor));
+
+	if (key == NULL)
+		return EINVAL;
+
+	thread = pthread_self();
+	inf = GetThreadInfo(thread);
+
+	for (i = 0; i < PTHREAD_KEYS_MAX; i++)
+	{
+		if (inf->tls[i].used == FALSE)
+			break;
+	}
+
+	if (i >= PTHREAD_KEYS_MAX)
+		return EAGAIN;
+
+	tls = &inf->tls[i];
+	tls->used = TRUE;
+	tls->destructor = destructor;
+
+	*key = i;
+
+	return 0;
+}
+
+int pthread_key_delete(pthread_key_t key)
+{
+	pthread_t thread;
+	ThreadInfo *inf;
+	TLSKey *tls;
+
+	D(bug("%s(%u)\n", __FUNCTION__, key));
+
+	thread = pthread_self();
+	inf = GetThreadInfo(thread);
+	tls = &inf->tls[key];
+
+	if (tls->used == FALSE)
+		return EINVAL;
+
+	if (tls->destructor)
+		tls->destructor(tls->value);
+
+	tls->used = FALSE;
+	tls->destructor = NULL;
+
+	return 0;
+}
+
+int pthread_setspecific(pthread_key_t key, const void *value)
+{
+	pthread_t thread;
+	ThreadInfo *inf;
+	TLSKey *tls;
+
+	D(bug("%s(%u)\n", __FUNCTION__, key));
+
+	thread = pthread_self();
+	inf = GetThreadInfo(thread);
+	tls = &inf->tls[key];
+
+	if (tls->used == FALSE)
+		return EINVAL;
+
+	tls->value = (void *)value;
+
+	return 0;
+}
+
+void *pthread_getspecific(pthread_key_t key)
+{
+	pthread_t thread;
+	ThreadInfo *inf;
+	TLSKey *tls;
+	void *value = NULL;
+
+	D(bug("%s(%u)\n", __FUNCTION__, key));
+
+	thread = pthread_self();
+	inf = GetThreadInfo(thread);
+	tls = &inf->tls[key];
+
+	if (tls->used == TRUE)
+		value = tls->value;
+
+	return value;
+}
+
+//
+// Mutex attribute functions
+//
+
+int pthread_mutexattr_init(pthread_mutexattr_t *attr)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, attr));
+
+	if (attr == NULL)
+		return EINVAL;
+
+	memset(attr, 0, sizeof(pthread_mutexattr_t));
+
+	return 0;
+}
+
+int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int kind)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, attr));
+
+	if (attr == NULL)
+		return EINVAL;
+
+	attr->kind = kind;
+
+	return 0;
 }
 
 //
@@ -115,6 +281,25 @@ int pthread_mutex_lock(pthread_mutex_t *mutex)
 	ObtainSemaphore(&mutex->semaphore);
 
 	return 0;
+}
+
+int pthread_mutex_trylock(pthread_mutex_t *mutex)
+{
+	ULONG ret;
+
+	D(bug("%s(%p)\n", __FUNCTION__, mutex));
+
+	if (mutex == NULL)
+		return EINVAL;
+
+	// initialize static mutexes
+	if (SemaphoreIsInvalid(&mutex->semaphore))
+		pthread_mutex_init(mutex, NULL);
+
+	// TODO: non-recursive mutexes?
+	ret = AttemptSemaphore(&mutex->semaphore);
+
+	return (ret == TRUE) ? 0 : EBUSY;
 }
 
 int pthread_mutex_unlock(pthread_mutex_t *mutex)
@@ -320,9 +505,11 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 		return EINVAL;
 
 	inf = GetThreadInfo(nextid);
+	memset(inf, 0, sizeof(ThreadInfo));
 	inf->start = start;
 	inf->attr = attr;
 	inf->arg = arg;
+	NewList((struct List *)&inf->cleanup);
 
 	// let's trick CreateNewProc into allocating a larger buffer for the name
 	snprintf(buf, sizeof(buf), "pthread thread #%d", nextid);
@@ -377,6 +564,8 @@ int pthread_join(pthread_t thread, void **value_ptr)
 	if (value_ptr)
 		*value_ptr = inf->ret;
 
+	memset(inf, 0, sizeof(ThreadInfo));
+
 	return 0;
 }
 
@@ -389,20 +578,13 @@ int pthread_equal(pthread_t t1, pthread_t t2)
 
 pthread_t pthread_self(void)
 {
-	pthread_t i;
 	struct Task *task;
 
 	D(bug("%s()\n", __FUNCTION__));
 
 	task = FindTask(NULL);
 
-	for (i = 0; i < PTHREAD_THREADS_MAX; i++)
-	{
-		if ((struct Task *)threads[i].process == task)
-			break;
-	}
-
-	return i;
+	return GetThreadId(task);
 }
 
 void pthread_exit(void *value_ptr)
@@ -475,4 +657,44 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len)
 	return 0;
 }
 
+//
+// Cancellation cleanup
+//
+
+// theads can't be cancelled, but they can still call pthread_exit, which
+// will execute these clean-up handlers
+void pthread_cleanup_push(void (*routine)(void *), void *arg)
+{
+	pthread_t thread;
+	ThreadInfo *inf;
+	CleanupHandler *handler;
+
+	D(bug("%s(%p, %p)\n", __FUNCTION__, routine, arg));
+
+	handler = AllocVec(sizeof(CleanupHandler), MEMF_PUBLIC | MEMF_CLEAR);
+
+	if (routine == NULL || handler == NULL)
+		return;
+
+	thread = pthread_self();
+	inf = GetThreadInfo(thread);
+
+	AddTail((struct List *)&inf->cleanup, (struct Node *)handler);
+}
+
+void pthread_cleanup_pop(int execute)
+{
+	pthread_t thread;
+	ThreadInfo *inf;
+	CleanupHandler *handler;
+
+	D(bug("%s(%d)\n", __FUNCTION__, execute));
+
+	thread = pthread_self();
+	inf = GetThreadInfo(thread);
+	handler = (CleanupHandler *)RemTail((struct List *)&inf->cleanup);
+
+	if (handler && handler->routine && execute)
+		handler->routine(handler->arg);
+}
 

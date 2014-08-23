@@ -23,6 +23,7 @@
 
 #include <sys/types.h>
 #include <time.h>
+#include <errno.h>
 #include <exec/types.h>
 #include <exec/semaphores.h>
 
@@ -242,6 +243,26 @@ int pthread_setconcurrency(int level);
 int pthread_getconcurrency(void);
 
 //
+// Thread specific data functions
+//
+
+int pthread_key_create(pthread_key_t *key, void (*destructor)(void *));
+int pthread_key_delete(pthread_key_t key);
+int pthread_setspecific(pthread_key_t key, const void *value);
+void *pthread_getspecific(pthread_key_t key);
+
+//
+// Mutex attribute functions
+//
+
+int pthread_mutexattr_init(pthread_mutexattr_t *attr);
+int pthread_mutexattr_destroy(pthread_mutexattr_t *attr);
+int pthread_mutexattr_getpshared(const pthread_mutexattr_t *attr, int *pshared);
+int pthread_mutexattr_setpshared(pthread_mutexattr_t *attr, int pshared);
+int pthread_mutexattr_gettype(pthread_mutexattr_t *attr, int *kind);
+int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int kind);
+
+//
 // Mutex functions
 //
 
@@ -266,9 +287,16 @@ int pthread_cond_broadcast(pthread_cond_t *cond);
 //
 // NP
 //
+
 int pthread_setname_np(pthread_t thread, const char *name);
 int pthread_getname_np(pthread_t thread, char *name, size_t len);
 
+//
+// Cancellation cleanup
+//
+
+void pthread_cleanup_push(void (*routine)(void *), void *arg);
+void pthread_cleanup_pop(int execute);
 
 #ifdef  __cplusplus
 }
