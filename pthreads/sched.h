@@ -28,6 +28,10 @@
 #define SCHED_RR		2
 #define SCHED_BATCH		3
 
+#ifdef  __cplusplus
+extern "C" {
+#endif
+
 int sched_get_priority_max(int);
 int sched_get_priority_min(int);
 //int sched_getparam(pid_t, struct sched_param *);
@@ -36,5 +40,9 @@ int sched_get_priority_min(int);
 //int sched_setparam(pid_t, const struct sched_param *);
 //int sched_setscheduler(pid_t, int, const struct sched_param *);
 int sched_yield(void);
+
+#ifdef  __cplusplus
+}
+#endif
 
 #endif
