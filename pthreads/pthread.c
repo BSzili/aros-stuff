@@ -99,7 +99,7 @@ static pthread_t GetThreadId(struct Task *task)
 {
 	pthread_t i;
 
-	for (i = 0; i < PTHREAD_THREADS_MAX; i++)
+	for (i = 0; i < /*nextid*/PTHREAD_THREADS_MAX; i++)
 	{
 		if ((struct Task *)threads[i].process == task)
 			break;
@@ -579,12 +579,27 @@ int pthread_equal(pthread_t t1, pthread_t t2)
 pthread_t pthread_self(void)
 {
 	struct Task *task;
+	pthread_t thread;
 
 	D(bug("%s()\n", __FUNCTION__));
 
 	task = FindTask(NULL);
+	thread = GetThreadId(task);
+	
+	// add non-pthread processes to our list, so we can handle the main thread
+	// TODO: this is not thread-safe
+	if (/*nextid == 1 ||*/ thread >= PTHREAD_THREADS_MAX)
+	{
+		ThreadInfo *inf;
+		
+		thread = nextid++;
+		inf = GetThreadInfo(thread);
+		memset(inf, 0, sizeof(ThreadInfo));
+		NewList((struct List *)&inf->cleanup);
+		inf->process = (struct Process *)task;
+	}
 
-	return GetThreadId(task);
+	return thread;
 }
 
 void pthread_exit(void *value_ptr)
