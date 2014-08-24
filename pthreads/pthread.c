@@ -499,13 +499,15 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	char buf[NAMELEN];
 	char name[NAMELEN];
 	size_t oldlen;
+	pthread_t threadnew;
 
 	D(bug("%s(%p, %p, %p, %p)\n", __FUNCTION__, thread, attr, start, arg));
 
 	if (thread == NULL || start == NULL)
 		return EINVAL;
 
-	inf = GetThreadInfo(nextid);
+	threadnew = nextid++;
+	inf = GetThreadInfo(threadnew);
 	memset(inf, 0, sizeof(ThreadInfo));
 	inf->start = start;
 	inf->attr = attr;
@@ -513,7 +515,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	NewList((struct List *)&inf->cleanup);
 
 	// let's trick CreateNewProc into allocating a larger buffer for the name
-	snprintf(buf, sizeof(buf), "pthread thread #%d", nextid);
+	snprintf(buf, sizeof(buf), "pthread thread #%d", threadnew);
 	oldlen = strlen(buf);
 	memset(name, ' ', sizeof(name));
 	memcpy(name, buf, oldlen);
@@ -545,7 +547,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 		return EAGAIN;
 	}
 
-	*thread = nextid++;
+	*thread = threadnew;
 
 	return 0;
 }
