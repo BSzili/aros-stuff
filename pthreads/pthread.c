@@ -720,6 +720,8 @@ void pthread_cleanup_pop(int execute)
 
 	if (handler && handler->routine && execute)
 		handler->routine(handler->arg);
+
+	FreeVec(handler);
 }
 
 //
