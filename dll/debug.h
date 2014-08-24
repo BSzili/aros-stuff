@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2002 Hyperion Entertainment
+ * Copyright (C) 2014 Szilard Biro
  * 
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
