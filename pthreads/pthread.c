@@ -26,6 +26,7 @@
 #include <setjmp.h>
 #include <string.h>
 #include <stdio.h>
+#include <signal.h>
 
 #include "pthread.h"
 #include "debug.h"
@@ -602,6 +603,14 @@ pthread_t pthread_self(void)
 	return thread;
 }
 
+int pthread_cancel(pthread_t thread)
+{
+	D(bug("%s(%u) not implemented\n", __FUNCTION__, thread));
+
+	// TODO: should I do a pthread_join here?
+	return ESRCH;
+}
+
 void pthread_exit(void *value_ptr)
 {
 	ThreadInfo *inf;
@@ -713,3 +722,20 @@ void pthread_cleanup_pop(int execute)
 		handler->routine(handler->arg);
 }
 
+//
+// Signalling
+//
+
+int pthread_kill(pthread_t thread, int sig)
+{
+	ThreadInfo *inf;
+	struct ETask *et;
+
+	inf = GetThreadInfo(thread);
+	et = GetETask((struct Task *)inf->process);
+
+	if (et == NULL)
+		return EINVAL;
+
+	return kill((pid_t)et->et_UniqueID, sig);
+}

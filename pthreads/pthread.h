@@ -298,6 +298,12 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len);
 void pthread_cleanup_push(void (*routine)(void *), void *arg);
 void pthread_cleanup_pop(int execute);
 
+//
+// Signalling
+//
+
+int pthread_kill(pthread_t thread, int sig);
+
 #ifdef  __cplusplus
 }
 #endif
