@@ -75,7 +75,7 @@ typedef struct
 
 // TODO: make this a list
 static ThreadInfo threads[PTHREAD_THREADS_MAX];
-static pthread_t nextid = 0;
+static volatile pthread_t nextid = 0;
 
 //
 // Helper functions
@@ -506,7 +506,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	if (thread == NULL || start == NULL)
 		return EINVAL;
 
-	threadnew = nextid++;
+	threadnew = nextid++; //__sync_add_and_fetch(&nextid, 1);
 	inf = GetThreadInfo(threadnew);
 	memset(inf, 0, sizeof(ThreadInfo));
 	inf->start = start;
@@ -532,12 +532,12 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	inf->process = CreateNewProcTags(NP_Entry, StarterFunc,
 #ifdef __MORPHOS__
 		NP_CodeType, CODETYPE_PPC,
-		(attr && attr->stacksize > 0) ? NP_PPCStackSize : TAG_IGNORE, attr->stacksize,
+		(attr && attr->stacksize > 0) ? NP_PPCStackSize : TAG_IGNORE, (attr) ? attr->stacksize : 0,
 #else
-		(attr && attr->stacksize > 0) ? NP_StackSize : TAG_IGNORE, attr->stacksize,
+		(attr && attr->stacksize > 0) ? NP_StackSize : TAG_IGNORE, (attr) ? attr->stacksize : 0,
 #endif
 		NP_UserData, inf,
-		(attr) ? NP_Priority : TAG_IGNORE, attr->param.sched_priority,
+		(attr) ? NP_Priority : TAG_IGNORE, (attr) ? attr->param.sched_priority : 0,
 		NP_Name, name,
 		TAG_DONE);
 
@@ -595,7 +595,7 @@ pthread_t pthread_self(void)
 	{
 		ThreadInfo *inf;
 		
-		thread = nextid++;
+		thread = nextid++; //__sync_add_and_fetch(&nextid, 1);
 		inf = GetThreadInfo(thread);
 		memset(inf, 0, sizeof(ThreadInfo));
 		NewList((struct List *)&inf->cleanup);
