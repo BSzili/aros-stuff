@@ -19,6 +19,7 @@
 */
 
 //#include <exec/lists.h>
+#include <dos/dostags.h>
 #include <clib/alib_protos.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -257,7 +258,7 @@ int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr)
 
 int pthread_mutex_destroy(pthread_mutex_t *mutex)
 {
-	D(bug("%s(%p)\n", __FUNCTION__, mutex));
+	//D(bug("%s(%p)\n", __FUNCTION__, mutex));
 
 	if (mutex == NULL)
 		return EINVAL;
@@ -269,7 +270,7 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex)
 
 int pthread_mutex_lock(pthread_mutex_t *mutex)
 {
-	D(bug("%s(%p)\n", __FUNCTION__, mutex));
+	//D(bug("%s(%p)\n", __FUNCTION__, mutex));
 
 	if (mutex == NULL)
 		return EINVAL;
@@ -288,7 +289,7 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
 {
 	ULONG ret;
 
-	D(bug("%s(%p)\n", __FUNCTION__, mutex));
+	//D(bug("%s(%p)\n", __FUNCTION__, mutex));
 
 	if (mutex == NULL)
 		return EINVAL;
@@ -305,7 +306,7 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
 
 int pthread_mutex_unlock(pthread_mutex_t *mutex)
 {
-	D(bug("%s(%p)\n", __FUNCTION__, mutex));
+	//D(bug("%s(%p)\n", __FUNCTION__, mutex));
 
 	if (mutex == NULL)
 		return EINVAL;
@@ -732,9 +733,13 @@ void pthread_cleanup_pop(int execute)
 
 int pthread_kill(pthread_t thread, int sig)
 {
+
 	ThreadInfo *inf;
 	struct ETask *et;
 
+	D(bug("%s(%u, %d)\n", __FUNCTION__, thread, sig));
+
+#ifdef __AROS__
 	inf = GetThreadInfo(thread);
 	et = GetETask((struct Task *)inf->process);
 
@@ -742,4 +747,7 @@ int pthread_kill(pthread_t thread, int sig)
 		return EINVAL;
 
 	return kill((pid_t)et->et_UniqueID, sig);
+#else
+	return EINVAL;
+#endif
 }

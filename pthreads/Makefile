@@ -11,6 +11,10 @@ else
 CFLAGS += -O2
 endif
 
+ifeq ($(OSTYPE), MorphOS)
+CFLAGS += -noixemul
+endif
+
 OBJ = \
 	pthread.o \
 	sched.o

@@ -22,7 +22,7 @@
 #define PTHREAD_H
 
 #include <sys/types.h>
-#include <time.h>
+#include <sys/time.h>
 #include <errno.h>
 #include <exec/types.h>
 #include <exec/semaphores.h>
