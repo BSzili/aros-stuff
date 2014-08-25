@@ -23,6 +23,11 @@
 #include <clib/alib_protos.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#ifdef __AROS__
+#include <aros/symbolsets.h>
+#else
+#include <constructor.h>
+#endif
 
 #include <setjmp.h>
 #include <string.h>
@@ -34,6 +39,7 @@
 
 #define FALLBACKSIGNAL SIGBREAKB_CTRL_E
 #define NAMELEN 64
+#define PTHREAD_INVALID_ID ((pthread_t)-1)
 
 struct cond_waiter
 {
@@ -76,7 +82,8 @@ typedef struct
 
 // TODO: make this a list
 static ThreadInfo threads[PTHREAD_THREADS_MAX];
-static volatile pthread_t nextid = 0;
+//static volatile pthread_t nextid = 0;
+static struct SignalSemaphore thread_sem;
 
 //
 // Helper functions
@@ -91,7 +98,9 @@ static ThreadInfo *GetThreadInfo(pthread_t thread)
 {
 	ThreadInfo *inf = NULL;
 
-	if (thread < nextid)
+	//if (thread < nextid)
+	// TODO: more robust error handling?
+	if (thread < PTHREAD_THREADS_MAX)
 		inf = &threads[thread];
 
 	return inf;
@@ -101,13 +110,18 @@ static pthread_t GetThreadId(struct Task *task)
 {
 	pthread_t i;
 
-	for (i = 0; i < /*nextid*/PTHREAD_THREADS_MAX; i++)
+	ObtainSemaphore(&thread_sem);
+
+	for (i = 0; i < PTHREAD_THREADS_MAX; i++)
 	{
 		if ((struct Task *)threads[i].process == task)
 			break;
 	}
 
-	// TODO: error handling?
+	ReleaseSemaphore(&thread_sem);
+
+	if (i >= PTHREAD_THREADS_MAX)
+		i = PTHREAD_INVALID_ID;
 
 	return i;
 }
@@ -507,7 +521,11 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	if (thread == NULL || start == NULL)
 		return EINVAL;
 
-	threadnew = nextid++; //__sync_add_and_fetch(&nextid, 1);
+	//threadnew = nextid++; //__sync_add_and_fetch(&nextid, 1);
+	threadnew = GetThreadId(NULL);
+	if (threadnew == PTHREAD_INVALID_ID)
+		return EAGAIN;
+
 	inf = GetThreadInfo(threadnew);
 	memset(inf, 0, sizeof(ThreadInfo));
 	inf->start = start;
@@ -561,10 +579,15 @@ int pthread_join(pthread_t thread, void **value_ptr)
 
 	inf = GetThreadInfo(thread);
 
+	if (!inf->msgport)
+		return ESRCH;
+
 	//while (!GetMsg(inf->msgport))
 		WaitPort(inf->msgport);
 
 	DeleteMsgPort(inf->msgport);
+	//inf->msgport = NULL;
+
 	if (value_ptr)
 		*value_ptr = inf->ret;
 
@@ -589,14 +612,14 @@ pthread_t pthread_self(void)
 
 	task = FindTask(NULL);
 	thread = GetThreadId(task);
-	
+
 	// add non-pthread processes to our list, so we can handle the main thread
-	// TODO: this is not thread-safe
-	if (/*nextid == 1 ||*/ thread >= PTHREAD_THREADS_MAX)
+	if (thread == PTHREAD_INVALID_ID)
 	{
 		ThreadInfo *inf;
-		
-		thread = nextid++; //__sync_add_and_fetch(&nextid, 1);
+
+		thread = GetThreadId(NULL);
+		//thread = nextid++; //__sync_add_and_fetch(&nextid, 1);
 		inf = GetThreadInfo(thread);
 		memset(inf, 0, sizeof(ThreadInfo));
 		NewList((struct List *)&inf->cleanup);
@@ -617,11 +640,16 @@ int pthread_cancel(pthread_t thread)
 void pthread_exit(void *value_ptr)
 {
 	ThreadInfo *inf;
+	CleanupHandler *handler;
 
 	D(bug("%s(%p)\n", __FUNCTION__, value_ptr));
 
 	inf = GetThreadInfo(pthread_self());
 	inf->ret = value_ptr;
+
+	while ((handler = (CleanupHandler *)RemTail((struct List *)&inf->cleanup)))
+		if (handler->routine)
+			handler->routine(handler->arg);
 
 	longjmp(inf->jmp, 1);
 }
@@ -751,3 +779,45 @@ int pthread_kill(pthread_t thread, int sig)
 	return EINVAL;
 #endif
 }
+
+//
+// Constructors, destructors
+//
+
+static int _Init_Func(void)
+{
+	D(bug("%s()\n", __FUNCTION__));
+
+	memset(&threads, 0, sizeof(threads));
+	InitSemaphore(&thread_sem);
+
+	return TRUE;
+}
+
+static void _Exit_Func(void)
+{
+	pthread_t i;
+
+	D(bug("%s()\n", __FUNCTION__));
+
+	// wait for the threads?
+#if 0
+	for (i = 0; i < PTHREAD_THREADS_MAX; i++)
+		pthread_join(i, NULL);
+#endif
+}
+
+#ifdef __AROS__
+ADD2INIT(_Init_Func, 0);
+ADD2EXIT(_Exit_Func, 0);
+#else
+static DESTRUCTOR_P(_Init_Func, 100)
+{
+	return !_Init_Func();
+}
+
+static CONSTRUCTOR_P(_Exit_Func, 100)
+{
+	_Exit_Func();
+}
+#endif
