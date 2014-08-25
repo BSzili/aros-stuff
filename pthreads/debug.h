@@ -34,7 +34,7 @@
 		#define bug DebugPrintF
 	#else
 		#include <clib/debug_protos.h>
-		#define bug kprintf
+		#define bug(fmt, ...) kprintf((CONST_STRPTR)fmt, __VA_ARGS__)
 	#endif
 #endif
 
