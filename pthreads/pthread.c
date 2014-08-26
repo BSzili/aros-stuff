@@ -41,12 +41,12 @@
 #define NAMELEN 64
 #define PTHREAD_INVALID_ID ((pthread_t)-1)
 
-struct cond_waiter
+typedef struct
 {
 	struct MinNode node;
 	struct Task *task;
 	ULONG sigmask;
-};
+} CondWaiter;
 
 typedef struct
 {
@@ -84,6 +84,7 @@ typedef struct
 static ThreadInfo threads[PTHREAD_THREADS_MAX];
 //static volatile pthread_t nextid = 0;
 static struct SignalSemaphore thread_sem;
+APTR mempool;
 
 //
 // Helper functions
@@ -369,7 +370,7 @@ int pthread_cond_destroy(pthread_cond_t *cond)
 
 int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 {
-	struct cond_waiter waiter;
+	CondWaiter waiter;
 	BYTE signal;
 
 	D(bug("%s(%p, %p)\n", __FUNCTION__, cond, mutex));
@@ -411,7 +412,7 @@ int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 
 int pthread_cond_signal(pthread_cond_t *cond)
 {
-	struct cond_waiter *waiter;
+	CondWaiter *waiter;
 
 	D(bug("%s(%p)\n", __FUNCTION__, cond));
 
@@ -425,7 +426,7 @@ int pthread_cond_signal(pthread_cond_t *cond)
 	ObtainSemaphore(&cond->semaphore);
 	if (cond->waiting > 0)
 	{
-		waiter = (struct cond_waiter *)cond->waiters.mlh_Head;
+		waiter = (CondWaiter *)cond->waiters.mlh_Head;
 		if (waiter->node.mln_Succ)
 			Signal(waiter->task, waiter->sigmask);
 	}
@@ -521,10 +522,15 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	if (thread == NULL || start == NULL)
 		return EINVAL;
 
+	ObtainSemaphore(&thread_sem);
+
 	//threadnew = nextid++; //__sync_add_and_fetch(&nextid, 1);
 	threadnew = GetThreadId(NULL);
 	if (threadnew == PTHREAD_INVALID_ID)
+	{
+		ReleaseSemaphore(&thread_sem);
 		return EAGAIN;
+	}
 
 	inf = GetThreadInfo(threadnew);
 	memset(inf, 0, sizeof(ThreadInfo));
@@ -542,7 +548,10 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 
 	inf->msgport = CreateMsgPort();
 	if (!inf->msgport)
+	{
+		ReleaseSemaphore(&thread_sem);
 		return EAGAIN;
+	}
 
 	inf->msg.mn_Node.ln_Type = NT_MESSAGE;
 	inf->msg.mn_ReplyPort = inf->msgport;
@@ -552,6 +561,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 #ifdef __MORPHOS__
 		NP_CodeType, CODETYPE_PPC,
 		(attr && attr->stacksize > 0) ? NP_PPCStackSize : TAG_IGNORE, (attr) ? attr->stacksize : 0,
+		//NP_StartupMsg, &inf->msg,
 #else
 		(attr && attr->stacksize > 0) ? NP_StackSize : TAG_IGNORE, (attr) ? attr->stacksize : 0,
 #endif
@@ -559,6 +569,8 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 		(attr) ? NP_Priority : TAG_IGNORE, (attr) ? attr->param.sched_priority : 0,
 		NP_Name, name,
 		TAG_DONE);
+
+	ReleaseSemaphore(&thread_sem);
 
 	if (!inf->process)
 	{
@@ -591,7 +603,9 @@ int pthread_join(pthread_t thread, void **value_ptr)
 	if (value_ptr)
 		*value_ptr = inf->ret;
 
+	ObtainSemaphore(&thread_sem);
 	memset(inf, 0, sizeof(ThreadInfo));
+	ReleaseSemaphore(&thread_sem);
 
 	return 0;
 }
@@ -618,12 +632,14 @@ pthread_t pthread_self(void)
 	{
 		ThreadInfo *inf;
 
+		ObtainSemaphore(&thread_sem);
 		thread = GetThreadId(NULL);
 		//thread = nextid++; //__sync_add_and_fetch(&nextid, 1);
 		inf = GetThreadInfo(thread);
 		memset(inf, 0, sizeof(ThreadInfo));
 		NewList((struct List *)&inf->cleanup);
 		inf->process = (struct Process *)task;
+		ReleaseSemaphore(&thread_sem);
 	}
 
 	return thread;
@@ -726,7 +742,7 @@ void pthread_cleanup_push(void (*routine)(void *), void *arg)
 
 	D(bug("%s(%p, %p)\n", __FUNCTION__, routine, arg));
 
-	handler = AllocVec(sizeof(CleanupHandler), MEMF_PUBLIC | MEMF_CLEAR);
+	handler = AllocVecPooled(mempool, sizeof(CleanupHandler));
 
 	if (routine == NULL || handler == NULL)
 		return;
@@ -752,7 +768,7 @@ void pthread_cleanup_pop(int execute)
 	if (handler && handler->routine && execute)
 		handler->routine(handler->arg);
 
-	FreeVec(handler);
+	FreeVecPooled(mempool, handler);
 }
 
 //
@@ -790,6 +806,7 @@ static int _Init_Func(void)
 
 	memset(&threads, 0, sizeof(threads));
 	InitSemaphore(&thread_sem);
+	mempool = CreatePool(MEMF_PUBLIC | MEMF_CLEAR | MEMF_SEM_PROTECTED, 16384, 4096);
 
 	return TRUE;
 }
@@ -805,6 +822,8 @@ static void _Exit_Func(void)
 	for (i = 0; i < PTHREAD_THREADS_MAX; i++)
 		pthread_join(i, NULL);
 #endif
+
+	DeletePool(mempool);
 }
 
 #ifdef __AROS__
