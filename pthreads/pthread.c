@@ -27,6 +27,8 @@
 #include <aros/symbolsets.h>
 #else
 #include <constructor.h>
+#define StackSwapArgs PPCStackSwapArgs
+#define NewStackSwap NewPPCStackSwap
 #endif
 
 #include <setjmp.h>
@@ -38,7 +40,7 @@
 #include "debug.h"
 
 #define FALLBACKSIGNAL SIGBREAKB_CTRL_E
-#define NAMELEN 64
+#define NAMELEN 32
 #define PTHREAD_INVALID_ID ((pthread_t)-1)
 
 typedef struct
@@ -464,11 +466,66 @@ int pthread_attr_destroy(pthread_attr_t *attr)
 	return 0;
 }
 
+int pthread_attr_getstack(const pthread_attr_t *attr, void **stackaddr, size_t *stacksize)
+{
+	D(bug("%s(%p, %p)\n", __FUNCTION__, attr, stackaddr));
+
+	if (attr == NULL)
+		return EINVAL;
+
+	if (stackaddr != NULL)
+		*stackaddr = attr->stackaddr;
+	
+	if (stacksize != NULL)
+		*stacksize = attr->stacksize;
+
+	return 0;
+}
+
+int pthread_attr_setstack(pthread_attr_t *attr, void *stackaddr, size_t stacksize)
+{
+	D(bug("%s(%p, %p)\n", __FUNCTION__, attr, stackaddr));
+
+	if (attr == NULL || (stackaddr != NULL && stacksize == 0))
+		return EINVAL;
+
+	attr->stackaddr = stackaddr;
+	attr->stacksize = stacksize;
+
+	return 0;
+}
+
+int pthread_attr_getstacksize(const pthread_attr_t *attr, size_t *stacksize)
+{
+	D(bug("%s(%p, %p)\n", __FUNCTION__, attr, stacksize));
+
+	return pthread_attr_getstack(attr, NULL, stacksize);
+}
+
+int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize)
+{
+	D(bug("%s(%p, %u)\n", __FUNCTION__, attr, stacksize));
+
+	return pthread_attr_setstack(attr, NULL, stacksize);
+}
+
+int pthread_attr_getschedparam(const pthread_attr_t *attr, struct sched_param *param)
+{
+	D(bug("%s(%p, %p)\n", __FUNCTION__, attr, param));
+
+	if (attr == NULL || param == NULL)
+		return EINVAL;
+
+	*param = attr->param;
+
+	return 0;
+}
+
 int pthread_attr_setschedparam(pthread_attr_t *attr, const struct sched_param *param)
 {
 	D(bug("%s(%p, %p)\n", __FUNCTION__, attr, param));
 
-	if (attr == NULL)
+	if (attr == NULL || param == NULL)
 		return EINVAL;
 
 	attr->param = *param;
@@ -479,16 +536,6 @@ int pthread_attr_setschedparam(pthread_attr_t *attr, const struct sched_param *p
 //
 // Thread functions
 //
-
-/*
-   struct PPCStackSwapArgs swapargs;
-   swapargs.Args[0] = (ULONG)arg;
-   return NewPPCStackSwap(stack, function, &swapargs);
-
-   struct StackSwapArgs swapargs;
-   swapargs.Args[0] = (IPTR)arg;
-   return NewStackSwap(stack, function, &swapargs);
-*/
 
 static void StarterFunc(void)
 {
@@ -501,7 +548,24 @@ static void StarterFunc(void)
 	//inf->process->pr_Task.tc_Node.ln_Name[inf->oldlen];
 
 	if (!setjmp(inf->jmp))
-		inf->ret = inf->start(inf->arg);
+	{
+		if (inf->attr->stackaddr && inf->attr->stacksize > 0)
+		{
+			struct StackSwapArgs swapargs;
+			struct StackSwapStruct stack; 
+
+			swapargs.Args[0] = (IPTR)inf->arg;
+			stack.stk_Lower = inf->attr->stackaddr;
+			stack.stk_Upper = (APTR)((IPTR)stack.stk_Lower + inf->attr->stacksize);
+			stack.stk_Pointer = stack.stk_Upper; 
+
+			inf->ret = (void *)NewStackSwap(&stack, inf->start, &swapargs);
+		}
+		else
+		{
+			inf->ret = inf->start(inf->arg);
+		}
+	}
 
 	Forbid();
 	ReplyMsg(&inf->msg);
@@ -560,10 +624,10 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	inf->process = CreateNewProcTags(NP_Entry, StarterFunc,
 #ifdef __MORPHOS__
 		NP_CodeType, CODETYPE_PPC,
-		(attr && attr->stacksize > 0) ? NP_PPCStackSize : TAG_IGNORE, (attr) ? attr->stacksize : 0,
+		(attr && inf->attr->stackaddr == NULL && attr->stacksize > 0) ? NP_PPCStackSize : TAG_IGNORE, (attr) ? attr->stacksize : 0,
 		//NP_StartupMsg, &inf->msg,
 #else
-		(attr && attr->stacksize > 0) ? NP_StackSize : TAG_IGNORE, (attr) ? attr->stacksize : 0,
+		(attr && inf->attr->stackaddr == NULL && attr->stacksize > 0) ? NP_StackSize : TAG_IGNORE, (attr) ? attr->stacksize : 0,
 #endif
 		NP_UserData, inf,
 		(attr) ? NP_Priority : TAG_IGNORE, (attr) ? attr->param.sched_priority : 0,
@@ -575,6 +639,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	if (!inf->process)
 	{
 		DeleteMsgPort(inf->msgport);
+		inf->msgport = NULL;
 		return EAGAIN;
 	}
 
@@ -699,6 +764,9 @@ int pthread_setname_np(pthread_t thread, const char *name)
 
 	D(bug("%s(%u, %s)\n", __FUNCTION__, thread, name));
 
+	if (name == NULL)
+		return ERANGE;
+
 	inf = GetThreadInfo(thread);
 	currentName = inf->process->pr_Task.tc_Node.ln_Name;
 
@@ -716,6 +784,9 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len)
 	char *currentName;
 
 	D(bug("%s(%u, %p, %u)\n", __FUNCTION__, thread, name, len));
+
+	if (name == NULL || len == 0)
+		return ERANGE;
 
 	inf = GetThreadInfo(thread);
 	currentName = inf->process->pr_Task.tc_Node.ln_Name;

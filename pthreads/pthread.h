@@ -69,7 +69,7 @@ struct sched_param
 //
 
 #define PTHREAD_KEYS_MAX                      64
-#define PTHREAD_STACK_MIN                     0
+#define PTHREAD_STACK_MIN                     40960
 #define PTHREAD_THREADS_MAX                   2019
 
 //
@@ -204,8 +204,8 @@ int pthread_attr_init(pthread_attr_t *attr);
 int pthread_attr_destroy(pthread_attr_t *attr);
 int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *detachstate);
 int pthread_attr_setdetachstate(pthread_attr_t *attr, int detachstate);
-int pthread_attr_getstackaddr(const pthread_attr_t *attr, void **stackaddr);
-int pthread_attr_setstackaddr(pthread_attr_t *attr, void *stackaddr);
+int pthread_attr_getstack(const pthread_attr_t *attr, void **stackaddr, size_t *stacksize);
+int pthread_attr_setstack(pthread_attr_t *attr, void *stackaddr, size_t stacksize);
 int pthread_attr_getstacksize(const pthread_attr_t *attr, size_t *stacksize);
 int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);
 int pthread_attr_getschedparam(const pthread_attr_t *attr, struct sched_param *param);
