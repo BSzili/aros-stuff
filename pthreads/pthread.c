@@ -901,12 +901,12 @@ static void _Exit_Func(void)
 ADD2INIT(_Init_Func, 0);
 ADD2EXIT(_Exit_Func, 0);
 #else
-static DESTRUCTOR_P(_Init_Func, 100)
+static CONSTRUCTOR_P(_Init_Func, 100)
 {
 	return !_Init_Func();
 }
 
-static CONSTRUCTOR_P(_Exit_Func, 100)
+static DESTRUCTOR_P(_Exit_Func, 100)
 {
 	_Exit_Func();
 }
