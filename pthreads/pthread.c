@@ -75,7 +75,7 @@ typedef struct
 	//pthread_t id;
 	void *ret;
 	jmp_buf jmp;
-	const pthread_attr_t *attr;
+	pthread_attr_t attr;
 	//char name[256];
 	//size_t oldlen;
 	TLSKey tls[PTHREAD_KEYS_MAX];
@@ -375,7 +375,7 @@ int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 	CondWaiter waiter;
 	BYTE signal;
 
-	D(bug("%s(%p, %p)\n", __FUNCTION__, cond, mutex));
+	//D(bug("%s(%p, %p)\n", __FUNCTION__, cond, mutex));
 
 	if (cond == NULL || mutex == NULL)
 		return EINVAL;
@@ -416,7 +416,7 @@ int pthread_cond_signal(pthread_cond_t *cond)
 {
 	CondWaiter *waiter;
 
-	D(bug("%s(%p)\n", __FUNCTION__, cond));
+	//D(bug("%s(%p)\n", __FUNCTION__, cond));
 
 	if (cond == NULL)
 		return EINVAL;
@@ -443,13 +443,17 @@ int pthread_cond_signal(pthread_cond_t *cond)
 
 int pthread_attr_init(pthread_attr_t *attr)
 {
+	struct Task *task = FindTask(NULL);
+
 	D(bug("%s(%p)\n", __FUNCTION__, attr));
 
 	if (attr == NULL)
 		return EINVAL;
 
 	memset(attr, 0, sizeof(pthread_attr_t));
-	// TODO: sensible defaults?
+	// inherit the priority and stack size of the parent thread
+	attr->param.sched_priority = task->tc_Node.ln_Pri;
+	attr->stacksize = (UBYTE *)task->tc_SPUpper - (UBYTE *)task->tc_SPLower;
 
 	return 0;
 }
@@ -547,16 +551,19 @@ static void StarterFunc(void)
 	// trim the name
 	//inf->process->pr_Task.tc_Node.ln_Name[inf->oldlen];
 
+	// we have to set the priority here to avoid race conditions
+	SetTaskPri((struct Task *)inf->process, inf->attr.param.sched_priority);
+
 	if (!setjmp(inf->jmp))
 	{
-		if (inf->attr->stackaddr && inf->attr->stacksize > 0)
+		if (inf->attr.stackaddr != NULL && inf->attr.stacksize > 0)
 		{
 			struct StackSwapArgs swapargs;
 			struct StackSwapStruct stack; 
 
 			swapargs.Args[0] = (IPTR)inf->arg;
-			stack.stk_Lower = inf->attr->stackaddr;
-			stack.stk_Upper = (APTR)((IPTR)stack.stk_Lower + inf->attr->stacksize);
+			stack.stk_Lower = inf->attr.stackaddr;
+			stack.stk_Upper = (APTR)((IPTR)stack.stk_Lower + inf->attr.stacksize);
 			stack.stk_Pointer = stack.stk_Upper; 
 
 			inf->ret = (void *)NewStackSwap(&stack, inf->start, &swapargs);
@@ -571,8 +578,6 @@ static void StarterFunc(void)
 	ReplyMsg(&inf->msg);
 }
 
-// TODO: we assume that sub-threads can only be started from the main one, which is NOT thread-safe
-// a semaphore could be added 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)(void *), void *arg)
 {
 	ThreadInfo *inf;
@@ -599,7 +604,10 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	inf = GetThreadInfo(threadnew);
 	memset(inf, 0, sizeof(ThreadInfo));
 	inf->start = start;
-	inf->attr = attr;
+	if (attr)
+		inf->attr = *attr;
+	else
+		pthread_attr_init(&inf->attr);
 	inf->arg = arg;
 	NewList((struct List *)&inf->cleanup);
 
@@ -624,13 +632,11 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	inf->process = CreateNewProcTags(NP_Entry, StarterFunc,
 #ifdef __MORPHOS__
 		NP_CodeType, CODETYPE_PPC,
-		(attr && inf->attr->stackaddr == NULL && attr->stacksize > 0) ? NP_PPCStackSize : TAG_IGNORE, (attr) ? attr->stacksize : 0,
-		//NP_StartupMsg, &inf->msg,
+		(inf->attr.stackaddr == NULL && inf->attr.stacksize > 0) ? NP_PPCStackSize : TAG_IGNORE, inf->attr.stacksize,
 #else
-		(attr && inf->attr->stackaddr == NULL && attr->stacksize > 0) ? NP_StackSize : TAG_IGNORE, (attr) ? attr->stacksize : 0,
+		(inf->attr.stackaddr == NULL && inf->attr.stacksize > 0) ? NP_StackSize : TAG_IGNORE, inf->attr.stacksize,
 #endif
 		NP_UserData, inf,
-		(attr) ? NP_Priority : TAG_IGNORE, (attr) ? attr->param.sched_priority : 0,
 		NP_Name, name,
 		TAG_DONE);
 
