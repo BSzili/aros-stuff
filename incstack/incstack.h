@@ -29,17 +29,17 @@ int main(int argc, char *argv[])
     { 
         struct StackSwapArgs swapargs;
         struct StackSwapStruct stack;
-        
+
         swapargs.Args[0] = argc;
         swapargs.Args[1] = (IPTR)argv;
-        
+
         if ((stack.stk_Lower = AllocVec(__stack, MEMF_PUBLIC)))
         {
             stack.stk_Upper = (APTR)((IPTR)stack.stk_Lower + __stack);
             stack.stk_Pointer = stack.stk_Upper;
-            
+
             rc = NewStackSwap(&stack, (void *)real_main, &swapargs);
-            
+
             FreeVec(stack.stk_Lower);
         }
         else
@@ -47,7 +47,7 @@ int main(int argc, char *argv[])
             printf("Couldn't allocate %d bytes for stack.\n", __stack);
         }
     }
- 
+
     return rc; 
 } 
 
