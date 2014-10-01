@@ -6,7 +6,7 @@
 #endif
 
 #include <proto/exec.h> 
-#include <proto/dos.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -44,7 +44,7 @@ int main(int argc, char *argv[])
         }
         else
         {
-            Printf((STRPTR)"Couldn't allocate %d bytes for stack.\n", __stack);
+            printf("Couldn't allocate %d bytes for stack.\n", __stack);
         }
     }
  
@@ -56,6 +56,5 @@ int main(int argc, char *argv[])
 #endif
 
 #define main(x,y) real_main(x,y)
-/*#define main real_main*/
 
 #endif
