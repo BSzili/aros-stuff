@@ -15,6 +15,11 @@ ifeq ($(OSTYPE), MorphOS)
 CFLAGS += -noixemul
 endif
 
+ifeq ($(OSTYPE), AROS)
+# I shouldn't need to do this manually
+CFLAGS += -march=i586
+endif
+
 OBJ = \
 	pthread.o \
 	sched.o
