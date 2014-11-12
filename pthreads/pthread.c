@@ -87,7 +87,6 @@ typedef struct
 static ThreadInfo threads[PTHREAD_THREADS_MAX];
 //static volatile pthread_t nextid = 0;
 static struct SignalSemaphore thread_sem;
-APTR mempool;
 
 //
 // Helper functions
@@ -916,7 +915,7 @@ void pthread_cleanup_push(void (*routine)(void *), void *arg)
 
 	D(bug("%s(%p, %p)\n", __FUNCTION__, routine, arg));
 
-	handler = AllocVecPooled(mempool, sizeof(CleanupHandler));
+	handler = calloc(1, sizeof(CleanupHandler));
 
 	if (routine == NULL || handler == NULL)
 		return;
@@ -942,7 +941,7 @@ void pthread_cleanup_pop(int execute)
 	if (handler && handler->routine && execute)
 		handler->routine(handler->arg);
 
-	FreeVecPooled(mempool, handler);
+	free(handler);
 }
 
 //
@@ -980,7 +979,6 @@ static int _Init_Func(void)
 
 	memset(&threads, 0, sizeof(threads));
 	InitSemaphore(&thread_sem);
-	mempool = CreatePool(MEMF_PUBLIC | MEMF_CLEAR | MEMF_SEM_PROTECTED, 16384, 4096);
 
 	return TRUE;
 }
@@ -996,8 +994,6 @@ static void _Exit_Func(void)
 	for (i = 0; i < PTHREAD_THREADS_MAX; i++)
 		pthread_join(i, NULL);
 #endif
-
-	DeletePool(mempool);
 }
 
 #ifdef __AROS__
