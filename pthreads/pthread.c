@@ -83,7 +83,6 @@ typedef struct
 	struct MinList cleanup;
 } ThreadInfo;
 
-// TODO: make this a list
 static ThreadInfo threads[PTHREAD_THREADS_MAX];
 //static volatile pthread_t nextid = 0;
 static struct SignalSemaphore thread_sem;
@@ -296,7 +295,6 @@ int pthread_mutex_lock(pthread_mutex_t *mutex)
 	if (SemaphoreIsInvalid(&mutex->semaphore))
 		pthread_mutex_init(mutex, NULL);
 
-	// TODO: non-recursive mutexes?
 	ObtainSemaphore(&mutex->semaphore);
 
 	return 0;
@@ -315,7 +313,6 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
 	if (SemaphoreIsInvalid(&mutex->semaphore))
 		pthread_mutex_init(mutex, NULL);
 
-	// TODO: non-recursive mutexes?
 	ret = AttemptSemaphore(&mutex->semaphore);
 
 	return (ret == TRUE) ? 0 : EBUSY;
