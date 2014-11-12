@@ -733,6 +733,13 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	return 0;
 }
 
+int pthread_detach(pthread_t thread)
+{
+	D(bug("%s(%u) not implemented\n", __FUNCTION__, thread));
+
+	return ESRCH;
+}
+
 int pthread_join(pthread_t thread, void **value_ptr)
 {
 	ThreadInfo *inf;
