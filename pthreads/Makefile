@@ -12,7 +12,7 @@ CFLAGS += -O2
 endif
 
 ifeq ($(OSTYPE), MorphOS)
-CFLAGS += -noixemul
+CFLAGS += -noixemul -DAROS_ALMOST_COMPATIBLE
 endif
 
 ifeq ($(OSTYPE), AROS)

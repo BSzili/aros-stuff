@@ -18,7 +18,9 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
-//#include <exec/lists.h>
+#ifdef __MORPHOS__
+#include <sys/time.h>
+#endif
 #include <dos/dostags.h>
 #include <clib/alib_protos.h>
 #include <proto/exec.h>
@@ -36,6 +38,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <signal.h>
+#include <stdlib.h>
 
 #include "pthread.h"
 #include "debug.h"
