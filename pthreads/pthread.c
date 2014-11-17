@@ -69,7 +69,6 @@ typedef struct
 	void *arg;
 } CleanupHandler;
 
-
 typedef struct
 {
 	void *(*start)(void *);
@@ -77,18 +76,14 @@ typedef struct
 	struct MsgPort *msgport;
 	struct Message msg;
 	struct Process *process;
-	//pthread_t id;
 	void *ret;
 	jmp_buf jmp;
 	pthread_attr_t attr;
-	//char name[256];
-	//size_t oldlen;
 	TLSKey tls[PTHREAD_KEYS_MAX];
 	struct MinList cleanup;
 } ThreadInfo;
 
 static ThreadInfo threads[PTHREAD_THREADS_MAX];
-//static volatile pthread_t nextid = 0;
 static struct SignalSemaphore thread_sem;
 
 //
@@ -104,7 +99,6 @@ static ThreadInfo *GetThreadInfo(pthread_t thread)
 {
 	ThreadInfo *inf = NULL;
 
-	//if (thread < nextid)
 	// TODO: more robust error handling?
 	if (thread < PTHREAD_THREADS_MAX)
 		inf = &threads[thread];
@@ -674,7 +668,6 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 
 	ObtainSemaphore(&thread_sem);
 
-	//threadnew = nextid++; //__sync_add_and_fetch(&nextid, 1);
 	threadnew = GetThreadId(NULL);
 	if (threadnew == PTHREAD_INVALID_ID)
 	{
@@ -753,11 +746,8 @@ int pthread_join(pthread_t thread, void **value_ptr)
 	if (!inf->msgport)
 		return ESRCH;
 
-	//while (!GetMsg(inf->msgport))
-		WaitPort(inf->msgport);
-
+	WaitPort(inf->msgport);
 	DeleteMsgPort(inf->msgport);
-	//inf->msgport = NULL;
 
 	if (value_ptr)
 		*value_ptr = inf->ret;
@@ -793,7 +783,6 @@ pthread_t pthread_self(void)
 
 		ObtainSemaphore(&thread_sem);
 		thread = GetThreadId(NULL);
-		//thread = nextid++; //__sync_add_and_fetch(&nextid, 1);
 		inf = GetThreadInfo(thread);
 		memset(inf, 0, sizeof(ThreadInfo));
 		NewList((struct List *)&inf->cleanup);
