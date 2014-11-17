@@ -46,6 +46,7 @@
 #define FALLBACKSIGNAL SIGBREAKB_CTRL_E
 #define NAMELEN 32
 #define PTHREAD_INVALID_ID ((pthread_t)-1)
+#define PTHREAD_FIRST_THREAD_ID (1)
 
 typedef struct
 {
@@ -117,7 +118,8 @@ static pthread_t GetThreadId(struct Task *task)
 
 	ObtainSemaphore(&thread_sem);
 
-	for (i = 0; i < PTHREAD_THREADS_MAX; i++)
+	// First thread id will be 1 so that it is different than default value of pthread_t
+	for (i = PTHREAD_FIRST_THREAD_ID; i < PTHREAD_THREADS_MAX; i++)
 	{
 		if ((struct Task *)threads[i].process == task)
 			break;
