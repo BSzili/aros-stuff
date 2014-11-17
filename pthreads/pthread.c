@@ -913,9 +913,12 @@ void pthread_cleanup_push(void (*routine)(void *), void *arg)
 
 	D(bug("%s(%p, %p)\n", __FUNCTION__, routine, arg));
 
+	if (routine == NULL)
+		return;
+
 	handler = calloc(1, sizeof(CleanupHandler));
 
-	if (routine == NULL || handler == NULL)
+	if (handler == NULL)
 		return;
 
 	thread = pthread_self();
