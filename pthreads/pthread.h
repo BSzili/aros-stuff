@@ -26,41 +26,13 @@
 #include <errno.h>
 #include <exec/types.h>
 #include <exec/semaphores.h>
-
-//
-// Basic types
-//
-
-/*#ifndef _TIMESPEC_DEFINED
-#define _TIMESPEC_DEFINED
-struct timespec
-{
-	long tv_sec;
-	long tv_nsec;
-};
-#endif*/
-
-#ifndef _SCHED_PARAM_DEFINED
-#define _SCHED_PARAM_DEFINED
-struct sched_param
-{
-	int sched_priority;
-};
-#endif
-
-#ifndef SCHED_RR
-#define SCHED_RR 0
-#endif
+#include <sched.h>
 
 //
 // POSIX options
 //
 
 #define _POSIX_THREADS
-#define _POSIX_READER_WRITER_LOCKS
-#define _POSIX_SPIN_LOCKS
-#define _POSIX_BARRIERS
-#define _POSIX_THREAD_SAFE_FUNCTIONS
 #define _POSIX_THREAD_ATTR_STACKSIZE
 #define _POSIX_THREAD_PRIORITY_SCHEDULING
 
@@ -158,6 +130,7 @@ struct pthread_mutex
 typedef struct pthread_mutex pthread_mutex_t;
 
 #define NULL_MINLIST {0, 0, 0}
+//#define NULL_MINLIST {0, 0, {0}}
 #define NULL_MINNODE {0, 0}
 #define NULL_NODE {0, 0, 0, 0, 0}
 #define NULL_SEMAPHOREREQUEST {NULL_MINNODE, 0}
@@ -285,7 +258,7 @@ int pthread_cond_signal(pthread_cond_t *cond);
 int pthread_cond_broadcast(pthread_cond_t *cond);
 
 //
-// NP
+// Non-portable functions
 //
 
 int pthread_setname_np(pthread_t thread, const char *name);

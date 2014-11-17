@@ -23,6 +23,11 @@
 
 #include <time.h>
 
+struct sched_param
+{
+	int sched_priority;
+};
+
 #define SCHED_NORMAL	0
 #define SCHED_FIFO		1
 #define SCHED_RR		2
