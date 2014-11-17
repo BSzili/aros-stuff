@@ -75,7 +75,7 @@ typedef struct
 	void *arg;
 	struct MsgPort *msgport;
 	struct Message msg;
-	struct Process *process;
+	struct Task *task;
 	void *ret;
 	jmp_buf jmp;
 	pthread_attr_t attr;
@@ -115,7 +115,7 @@ static pthread_t GetThreadId(struct Task *task)
 	// First thread id will be 1 so that it is different than default value of pthread_t
 	for (i = PTHREAD_FIRST_THREAD_ID; i < PTHREAD_THREADS_MAX; i++)
 	{
-		if ((struct Task *)threads[i].process == task)
+		if (threads[i].task == task)
 			break;
 	}
 
@@ -624,10 +624,10 @@ static void StarterFunc(void)
 
 	inf = (ThreadInfo *)FindTask(NULL)->tc_UserData;
 	// trim the name
-	//inf->process->pr_Task.tc_Node.ln_Name[inf->oldlen];
+	//inf->task->tc_Node.ln_Name[inf->oldlen];
 
 	// we have to set the priority here to avoid race conditions
-	SetTaskPri((struct Task *)inf->process, inf->attr.param.sched_priority);
+	SetTaskPri(inf->task, inf->attr.param.sched_priority);
 
 	if (!setjmp(inf->jmp))
 	{
@@ -703,7 +703,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	inf->msg.mn_ReplyPort = inf->msgport;
 	inf->msg.mn_Length = sizeof(inf->msg);
 
-	inf->process = CreateNewProcTags(NP_Entry, StarterFunc,
+	inf->task = (struct Task *)CreateNewProcTags(NP_Entry, StarterFunc,
 #ifdef __MORPHOS__
 		NP_CodeType, CODETYPE_PPC,
 		(inf->attr.stackaddr == NULL && inf->attr.stacksize > 0) ? NP_PPCStackSize : TAG_IGNORE, inf->attr.stacksize,
@@ -716,7 +716,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 
 	ReleaseSemaphore(&thread_sem);
 
-	if (!inf->process)
+	if (!inf->task)
 	{
 		DeleteMsgPort(inf->msgport);
 		inf->msgport = NULL;
@@ -786,7 +786,7 @@ pthread_t pthread_self(void)
 		inf = GetThreadInfo(thread);
 		memset(inf, 0, sizeof(ThreadInfo));
 		NewList((struct List *)&inf->cleanup);
-		inf->process = (struct Process *)task;
+		inf->task = task;
 		ReleaseSemaphore(&thread_sem);
 	}
 
@@ -849,7 +849,7 @@ int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param
 		return EINVAL;
 
 	inf = GetThreadInfo(thread);
-	SetTaskPri((struct Task *)inf->process, param->sched_priority);
+	SetTaskPri(inf->task, param->sched_priority);
 
 	return 0;
 }
@@ -868,7 +868,7 @@ int pthread_setname_np(pthread_t thread, const char *name)
 		return ERANGE;
 
 	inf = GetThreadInfo(thread);
-	currentName = inf->process->pr_Task.tc_Node.ln_Name;
+	currentName = inf->task->tc_Node.ln_Name;
 
 	if (strlen(name) + 1 > NAMELEN)
 		return ERANGE;
@@ -889,7 +889,7 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len)
 		return ERANGE;
 
 	inf = GetThreadInfo(thread);
-	currentName = inf->process->pr_Task.tc_Node.ln_Name;
+	currentName = inf->task->tc_Node.ln_Name;
 
 	if (strlen(currentName) + 1 > len)
 		return ERANGE;
@@ -956,7 +956,7 @@ int pthread_kill(pthread_t thread, int sig)
 
 #ifdef __AROS__
 	inf = GetThreadInfo(thread);
-	et = GetETask((struct Task *)inf->process);
+	et = GetETask(inf->task);
 
 	if (et == NULL)
 		return EINVAL;
