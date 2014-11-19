@@ -803,12 +803,14 @@ int pthread_cancel(pthread_t thread)
 
 void pthread_exit(void *value_ptr)
 {
+	pthread_t thread;
 	ThreadInfo *inf;
 	CleanupHandler *handler;
 
 	D(bug("%s(%p)\n", __FUNCTION__, value_ptr));
 
-	inf = GetThreadInfo(pthread_self());
+	thread = pthread_self();
+	inf = GetThreadInfo(thread);
 	inf->ret = value_ptr;
 
 	while ((handler = (CleanupHandler *)RemTail((struct List *)&inf->cleanup)))
@@ -855,7 +857,7 @@ int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param
 }
 
 //
-// NP
+// Non-portable functions
 //
 int pthread_setname_np(pthread_t thread, const char *name)
 {
