@@ -172,6 +172,9 @@ int pthread_key_delete(pthread_key_t key)
 
 	D(bug("%s(%u)\n", __FUNCTION__, key));
 
+	if (key >= PTHREAD_KEYS_MAX)
+		return EINVAL;
+
 	thread = pthread_self();
 	inf = GetThreadInfo(thread);
 	tls = &inf->tls[key];
@@ -196,6 +199,9 @@ int pthread_setspecific(pthread_key_t key, const void *value)
 
 	D(bug("%s(%u)\n", __FUNCTION__, key));
 
+	if (key >= PTHREAD_KEYS_MAX)
+		return EINVAL;
+
 	thread = pthread_self();
 	inf = GetThreadInfo(thread);
 	tls = &inf->tls[key];
@@ -216,6 +222,9 @@ void *pthread_getspecific(pthread_key_t key)
 	void *value = NULL;
 
 	D(bug("%s(%u)\n", __FUNCTION__, key));
+
+	if (key >= PTHREAD_KEYS_MAX)
+		return NULL;
 
 	thread = pthread_self();
 	inf = GetThreadInfo(thread);
@@ -554,7 +563,7 @@ int pthread_attr_getstack(const pthread_attr_t *attr, void **stackaddr, size_t *
 
 	if (stackaddr != NULL)
 		*stackaddr = attr->stackaddr;
-	
+
 	if (stacksize != NULL)
 		*stacksize = attr->stacksize;
 
@@ -743,7 +752,7 @@ int pthread_join(pthread_t thread, void **value_ptr)
 
 	inf = GetThreadInfo(thread);
 
-	if (!inf->msgport)
+	if (inf == NULL || inf->msgport == NULL)
 		return ESRCH;
 
 	WaitPort(inf->msgport);
@@ -783,6 +792,13 @@ pthread_t pthread_self(void)
 
 		ObtainSemaphore(&thread_sem);
 		thread = GetThreadId(NULL);
+		if (thread == PTHREAD_INVALID_ID)
+		{
+			// TODO: pthread_self is supposed to always succeed, but we can fail
+			// here if we run out of thread slots
+			//ReleaseSemaphore(&thread_sem);
+			//return EAGAIN;
+		}
 		inf = GetThreadInfo(thread);
 		memset(inf, 0, sizeof(ThreadInfo));
 		NewList((struct List *)&inf->cleanup);
@@ -851,6 +867,10 @@ int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param
 		return EINVAL;
 
 	inf = GetThreadInfo(thread);
+
+	if (inf == NULL)
+		return ESRCH;
+
 	SetTaskPri(inf->task, param->sched_priority);
 
 	return 0;
@@ -870,6 +890,10 @@ int pthread_setname_np(pthread_t thread, const char *name)
 		return ERANGE;
 
 	inf = GetThreadInfo(thread);
+
+	if (inf == NULL)
+		return ERANGE;
+
 	currentName = inf->task->tc_Node.ln_Name;
 
 	if (strlen(name) + 1 > NAMELEN)
@@ -891,10 +915,15 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len)
 		return ERANGE;
 
 	inf = GetThreadInfo(thread);
+
+	if (inf == NULL)
+		return ERANGE;
+
 	currentName = inf->task->tc_Node.ln_Name;
 
 	if (strlen(currentName) + 1 > len)
 		return ERANGE;
+
 	// TODO: partially copy the name?
 	strncpy(name, currentName, len);
 
@@ -961,6 +990,10 @@ int pthread_kill(pthread_t thread, int sig)
 
 #ifdef __AROS__
 	inf = GetThreadInfo(thread);
+
+	if (inf == NULL)
+		return ERANGE;
+
 	et = GetETask(inf->task);
 
 	if (et == NULL)
