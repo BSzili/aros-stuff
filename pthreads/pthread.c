@@ -396,6 +396,8 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const s
 
 	if (abstime)
 	{
+		struct timeval starttime;
+
 		if (!(timermp = CreateMsgPort()))
 			return EINVAL;
 
@@ -413,11 +415,6 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const s
 		}
 
 		TimerBase = timerio->tr_node.io_Device;
-	}
-
-	if (TimerBase)
-	{
-		struct timeval starttime;
 
 		gettimeofday(&starttime, NULL);
 		timerio->tr_node.io_Command = TR_ADDREQUEST;
