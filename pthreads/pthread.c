@@ -658,7 +658,6 @@ static void StarterFunc(void)
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)(void *), void *arg)
 {
 	ThreadInfo *inf;
-	char buf[NAMELEN];
 	char name[NAMELEN];
 	size_t oldlen;
 	pthread_t threadnew;
@@ -688,10 +687,9 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	NewList((struct List *)&inf->cleanup);
 
 	// let's trick CreateNewProc into allocating a larger buffer for the name
-	snprintf(buf, sizeof(buf), "pthread thread #%d", threadnew);
-	oldlen = strlen(buf);
-	memset(name, ' ', sizeof(name));
-	memcpy(name, buf, oldlen);
+	snprintf(name, sizeof(name), "pthread thread #%d", threadnew);
+	oldlen = strlen(name);
+	memset(name + oldlen, ' ', sizeof(name) - oldlen - 1);
 	name[sizeof(name) - 1] = '\0';
 
 	inf->msgport = CreateMsgPort();
