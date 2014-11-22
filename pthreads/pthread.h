@@ -152,7 +152,7 @@ typedef struct pthread_condattr pthread_condattr_t;
 
 struct pthread_cond
 {
-	int waiting;
+	int pad1;
 	struct SignalSemaphore semaphore;
 	struct MinList waiters;
 };

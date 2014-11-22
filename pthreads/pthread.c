@@ -355,7 +355,6 @@ int pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr)
 
 	InitSemaphore(&cond->semaphore);
 	NewList((struct List *)&cond->waiters);
-	cond->waiting = 0;
 
 	return 0;
 }
@@ -367,7 +366,8 @@ int pthread_cond_destroy(pthread_cond_t *cond)
 	if (cond == NULL)
 		return EINVAL;
 
-	if (cond->waiting > 0)
+	// TODO: semaphore protection?
+	if (!IsListEmpty(&cond->waiters))
 		return EBUSY;
 
 	memset(cond, 0, sizeof(pthread_cond_t));
@@ -416,6 +416,7 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const s
 
 		TimerBase = timerio->tr_node.io_Device;
 
+		// GetSysTime can't be used due to the timezone offset in abstime
 		gettimeofday(&starttime, NULL);
 		timerio->tr_node.io_Command = TR_ADDREQUEST;
 		timerio->tr_time.tv_secs = abstime->tv_sec;
@@ -437,7 +438,6 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const s
 	sigs |= waiter.sigmask;
 	ObtainSemaphore(&cond->semaphore);
 	AddTail((struct List *)&cond->waiters, (struct Node *)&waiter);
-	cond->waiting++;
 	ReleaseSemaphore(&cond->semaphore);
 
 	pthread_mutex_unlock(mutex);
@@ -446,7 +446,6 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const s
 
 	ObtainSemaphore(&cond->semaphore);
 	Remove((struct Node *)&waiter);
-	cond->waiting--;
 	ReleaseSemaphore(&cond->semaphore);
 
 	if (signal != FALLBACKSIGNAL)
@@ -491,13 +490,10 @@ static int _pthread_cond_broadcast(pthread_cond_t *cond, BOOL onlyfirst)
 		pthread_cond_init(cond, NULL);
 
 	ObtainSemaphore(&cond->semaphore);
-	if (cond->waiting > 0)
+	ForeachNode(&cond->waiters, waiter)
 	{
-		ForeachNode(&cond->waiters, waiter)
-		{
-			Signal(waiter->task, waiter->sigmask);
-			if (onlyfirst) break;
-		}
+		Signal(waiter->task, waiter->sigmask);
+		if (onlyfirst) break;
 	}
 	ReleaseSemaphore(&cond->semaphore);
 
