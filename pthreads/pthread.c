@@ -890,6 +890,7 @@ int pthread_setname_np(pthread_t thread, const char *name)
 {
 	ThreadInfo *inf;
 	char *currentName;
+	size_t namelen;
 
 	D(bug("%s(%u, %s)\n", __FUNCTION__, thread, name));
 
@@ -903,10 +904,15 @@ int pthread_setname_np(pthread_t thread, const char *name)
 
 	currentName = inf->task->tc_Node.ln_Name;
 
-	if (strlen(name) + 1 > NAMELEN)
+	if (inf->msgport == NULL)
+		namelen = strlen(currentName) + 1;
+	else
+		namelen = NAMELEN;
+
+	if (strlen(name) + 1 > namelen)
 		return ERANGE;
 
-	strncpy(currentName, name, NAMELEN);
+	strncpy(currentName, name, namelen);
 
 	return 0;
 }
