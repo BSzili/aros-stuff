@@ -119,11 +119,12 @@ void freeaddrinfo(struct addrinfo *aihead);
 #define	HENTMAXADDR	    32	/* max binary address: 16 for IPv4, 24 for IPv6 */
 
 		/* following internal flags cannot overlap with other AI_xxx flags */
-#define	AI_CLONE	     4	/* clone this entry for other socket types */
+#define	AI_CLONE	  4096	/* clone this entry for other socket types */
 
 		/* function prototypes for our own internal functions */
 static int	getaddrinfo_host(const char *, struct hostent *,
-							 struct hostent **, char *, int, int);
+							 struct hostent **, char *, int,
+							 const struct addrinfo *);
 static int	getaddrinfo_serv(struct addrinfo *,
 							 const struct addrinfo *, const char *,
 							 struct servent *, char *, int);
@@ -325,7 +326,7 @@ getaddrinfo(const char *host, const char *serv,
 	hptr = &hent;
 
 	if ( (rc = getaddrinfo_host(host, &hent, &hptr, hentbuf, HENTBUFSIZ,
-								hints.ai_family)) != 0)
+								&hints)) != 0)
 		error(rc);
 
 	/*
@@ -445,7 +446,7 @@ bad:
 static int
 getaddrinfo_host(const char *host,
 				 struct hostent *hptr, struct hostent **hptrptr,
-				 char *buf, int bufsiz, int family)
+				 char *buf, int bufsiz, const struct addrinfo *hintsptr)
 {
 
 #ifdef	REENTRANT
@@ -490,6 +491,9 @@ getaddrinfo_host(const char *host,
 	}
 #endif	/* IPV6 */
 
+	if (hintsptr->ai_flags & AI_NUMERICHOST)
+		return(EAI_NONAME);
+
 	/*
 	 * Not an address, must be a hostname, try the DNS.
 	 * Initialize the resolver, if not already initialized.
@@ -511,7 +515,7 @@ getaddrinfo_host(const char *host,
 	/* (if you're using 4.9.4, but have not installed the include files) */
 #define	RES_USE_INET6	0x00002000	/* use/map IPv6 in gethostbyname() */
 #endif
-	if (family == AF_INET6)
+	if (hintsptr->ai_family == AF_INET6)
 		_res.options |= RES_USE_INET6;
 #endif	/* IPV6 */
 
@@ -563,6 +567,9 @@ getaddrinfo_serv(struct addrinfo *aihead,
 		else
 			return(0);
 	}
+
+	if (hintsptr->ai_flags & AI_NUMERICSERV)
+		return(EAI_NONAME);
 
 	/*
 	 * Not a special case, try the "/etc/services" file (or whatever).

@@ -21,6 +21,8 @@ struct addrinfo {
 			/* following for getaddrinfo() */
 #define	AI_PASSIVE		 1	/* socket is intended for bind() + listen() */
 #define	AI_CANONNAME	 2	/* return canonical name */
+#define	AI_NUMERICHOST	 4	/* prevent host name resolution */
+#define	AI_NUMERICSERV	 8	/* prevent service name resolution */
 
 			/* following for getnameinfo() */
 #define	NI_MAXHOST	  1025	/* max hostname returned */

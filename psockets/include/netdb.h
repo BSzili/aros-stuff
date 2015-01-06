@@ -1,7 +1,11 @@
 #ifndef __NETDB_WRAPPER_H
 #define __NETDB_WRAPPER_H
 
-#ifndef __AROS__
+#ifdef __AROS__
+// FIXME
+#define	AI_NUMERICHOST	 4	/* prevent host name resolution */
+#define	AI_NUMERICSERV	 8	/* prevent service name resolution */
+#else
 #include "addrinfo.h"
 #endif
 #ifdef __MORPHOS__
