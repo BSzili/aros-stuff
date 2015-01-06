@@ -2,7 +2,7 @@
 #define __NETDB_WRAPPER_H
 
 #ifndef __AROS__
-#include "../addrinfo.h"
+#include "addrinfo.h"
 #endif
 #ifdef __MORPHOS__
 #include <exec/types.h>

@@ -42,10 +42,6 @@
 #include	<sys/un.h>		/* for Unix domain socket stuff */
 #endif
 
-#if !defined(__osf__) && !defined(__AROS__)
-#include	"addrinfo.h"	/* defines in here really belong in <netdb.h> */
-#endif
-
 /* NOTE: this code assumes you have the inet_pton() function as defined
  * in the BIND-4.9.4 release or later (ftp://ftp.vix.com/pub/bind).
  * If you don't have this in your resolver library, in this tar file is

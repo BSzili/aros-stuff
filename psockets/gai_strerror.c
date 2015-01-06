@@ -4,7 +4,7 @@
  */
 
 #include	<sys/types.h>
-#include	"addrinfo.h"	/* XXX should be <netdb.h> */
+#include	<netdb.h>
 
 char *
 gai_strerror(int err)
