@@ -547,6 +547,29 @@ int pthread_attr_destroy(pthread_attr_t *attr)
 	return 0;
 }
 
+int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *detachstate)
+{
+	D(bug("%s(%p, %p)\n", __FUNCTION__, attr, detachstate));
+
+	if (attr == NULL)
+		return EINVAL;
+
+	if (detachstate != NULL)
+		*detachstate = attr->detachstate;
+
+	return 0;
+}
+
+int pthread_attr_setdetachstate(pthread_attr_t *attr, int detachstate)
+{
+	D(bug("%s(%p, %d)\n", __FUNCTION__, attr, detachstate));
+
+	if (attr == NULL || detachstate != PTHREAD_CREATE_JOINABLE)
+		return EINVAL;
+
+	return 0;
+}
+
 int pthread_attr_getstack(const pthread_attr_t *attr, void **stackaddr, size_t *stacksize)
 {
 	D(bug("%s(%p, %p)\n", __FUNCTION__, attr, stackaddr));
