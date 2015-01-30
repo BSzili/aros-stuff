@@ -22,7 +22,8 @@ endif
 
 OBJ = \
 	pthread.o \
-	sched.o
+	sched.o \
+	semaphore.o
 
 all: libpthread.a
 
