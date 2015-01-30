@@ -852,7 +852,7 @@ void pthread_exit(void *value_ptr)
 
 #if defined __mc68000__
 /* No CAS instruction on m68k */
-static int __sync_val_compare_and_swap(int *v, int o, int n)
+static int __m68k_sync_val_compare_and_swap(int *v, int o, int n)
 {
 	int ret;
 
@@ -864,6 +864,8 @@ static int __sync_val_compare_and_swap(int *v, int o, int n)
 
 	return ret;
 }
+#undef __sync_val_compare_and_swap
+#define __sync_val_compare_and_swap(v, o, n) __m68k_sync_val_compare_and_swap(v, o, n)
 #endif
 
 int pthread_once(pthread_once_t *once_control, void (*init_routine)(void))
@@ -1057,7 +1059,9 @@ static int _Init_Func(void)
 
 static void _Exit_Func(void)
 {
+#if 0
 	pthread_t i;
+#endif
 
 	D(bug("%s()\n", __FUNCTION__));
 
