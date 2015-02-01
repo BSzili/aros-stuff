@@ -129,8 +129,11 @@ struct pthread_mutex
 
 typedef struct pthread_mutex pthread_mutex_t;
 
+//#ifndef __AROS__
 #define NULL_MINLIST {0, 0, 0}
+//#else
 //#define NULL_MINLIST {0, 0, {0}}
+//#endif
 #define NULL_MINNODE {0, 0}
 #define NULL_NODE {0, 0, 0, 0, 0}
 #define NULL_SEMAPHOREREQUEST {NULL_MINNODE, 0}
@@ -160,6 +163,43 @@ struct pthread_cond
 typedef struct pthread_cond pthread_cond_t;
 
 #define PTHREAD_COND_INITIALIZER {0, NULL_SEMAPHORE, NULL_MINLIST}
+
+//
+// Read-write locks
+//
+
+struct pthread_rwlockattr
+{
+	int pshared;
+};
+
+typedef struct pthread_rwlockattr pthread_rwlockattr_t;
+
+/*struct pthread_rwlock
+{
+	pthread_mutex_t mutex;
+	handle_t shared_waiters;
+	handle_t exclusive_waiters;
+	int num_shared_waiters;
+	int num_exclusive_waiters;
+	int num_active;
+	pthread_t owner;
+};*/
+
+struct pthread_rwlock
+{
+	pthread_mutex_t exclusive;
+	pthread_mutex_t shared;
+	pthread_cond_t shared_completed;
+	int exclusive_count;
+	int shared_count;
+	int completed_count;
+//	int nMagic;
+};
+
+typedef struct pthread_rwlock pthread_rwlock_t;
+
+#define PTHREAD_RWLOCK_INITIALIZER {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0, 0}
 
 //
 // POSIX thread routines
@@ -256,6 +296,29 @@ int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);
 int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abstime);
 int pthread_cond_signal(pthread_cond_t *cond);
 int pthread_cond_broadcast(pthread_cond_t *cond);
+
+//
+// Read-write lock attribute functions
+//
+
+int pthread_rwlockattr_init(pthread_rwlockattr_t *attr);
+int pthread_rwlockattr_destroy(pthread_rwlockattr_t *attr);
+int pthread_rwlockattr_getpshared(const pthread_rwlockattr_t *attr, int *pshared);
+int pthread_rwlockattr_setpshared(pthread_rwlockattr_t *attr, int pshared);
+
+//
+// Read-write lock functions
+//
+
+int pthread_rwlock_init(pthread_rwlock_t *lock, const pthread_rwlockattr_t *attr);
+int pthread_rwlock_destroy(pthread_rwlock_t *lock);
+int pthread_rwlock_tryrdlock(pthread_rwlock_t *lock);
+int pthread_rwlock_trywrlock(pthread_rwlock_t *lock);
+int pthread_rwlock_rdlock(pthread_rwlock_t *lock);
+int pthread_rwlock_timedrdlock(pthread_rwlock_t *lock, const struct timespec *abstime);
+int pthread_rwlock_wrlock(pthread_rwlock_t *lock);
+int pthread_rwlock_timedwrlock(pthread_rwlock_t *lock, const struct timespec *abstime);
+int pthread_rwlock_unlock(pthread_rwlock_t *lock);
 
 //
 // Non-portable functions
