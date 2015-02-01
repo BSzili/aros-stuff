@@ -3,7 +3,7 @@ AR = ar
 DEBUG = 1
 OSTYPE = $(shell uname -s)
 
-CFLAGS = -Wall
+CFLAGS = -Wall -I.
 
 ifeq ($(DEBUG), 1)
 CFLAGS += -g -DDEBUG
