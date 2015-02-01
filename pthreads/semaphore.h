@@ -21,9 +21,9 @@
 #ifndef SEMAPHORE_H
 #define SEMAPHORE_H
 
+#include <pthread.h>
 #include <time.h>
 #include <limits.h>
-#include <pthread.h>
 
 #define _POSIX_SEMAPHORES
 

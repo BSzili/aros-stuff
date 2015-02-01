@@ -21,6 +21,10 @@
 #include "semaphore.h"
 #include "debug.h"
 
+#ifndef EOVERFLOW
+#define EOVERFLOW EINVAL
+#endif
+
 int sem_init(sem_t *sem, int pshared, unsigned int value)
 {
 	D(bug("%s(%p, %d, %u)\n", __FUNCTION__, sem, pshared, value));
