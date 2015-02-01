@@ -252,6 +252,31 @@ int pthread_mutexattr_init(pthread_mutexattr_t *attr)
 	return 0;
 }
 
+int pthread_mutexattr_destroy(pthread_mutexattr_t *attr)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, attr));
+
+	if (attr == NULL)
+		return EINVAL;
+
+	memset(attr, 0, sizeof(pthread_mutexattr_t));
+
+	return 0;
+}
+
+int pthread_mutexattr_gettype(pthread_mutexattr_t *attr, int *kind)
+{
+	D(bug("%s(%p, %p)\n", __FUNCTION__, attr, kind));
+
+	if (attr == NULL)
+		return EINVAL;
+
+	if (kind)
+		*kind = attr->kind;
+
+	return 0;
+}
+
 int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int kind)
 {
 	D(bug("%s(%p)\n", __FUNCTION__, attr));
