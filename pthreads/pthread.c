@@ -343,6 +343,34 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex)
 }
 
 //
+// Condition variable attribute functions
+//
+
+int pthread_condattr_init(pthread_condattr_t *attr)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, attr));
+
+	if (attr == NULL)
+		return EINVAL;
+
+	memset(attr, 0, sizeof(pthread_condattr_t));
+
+	return 0;
+}
+
+int pthread_condattr_destroy(pthread_condattr_t *attr)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, attr));
+
+	if (attr == NULL)
+		return EINVAL;
+
+	memset(attr, 0, sizeof(pthread_condattr_t));
+
+	return 0;
+}
+
+//
 // Condition variable functions
 //
 
@@ -375,7 +403,7 @@ int pthread_cond_destroy(pthread_cond_t *cond)
 	return 0;
 }
 
-int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abstime)
+static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abstime, BOOL relative)
 {
 	CondWaiter waiter;
 	BYTE signal;
@@ -396,8 +424,6 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const s
 
 	if (abstime)
 	{
-		struct timeval starttime;
-
 		if (!(timermp = CreateMsgPort()))
 			return EINVAL;
 
@@ -416,12 +442,18 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const s
 
 		TimerBase = timerio->tr_node.io_Device;
 
-		// GetSysTime can't be used due to the timezone offset in abstime
-		gettimeofday(&starttime, NULL);
+
 		timerio->tr_node.io_Command = TR_ADDREQUEST;
 		timerio->tr_time.tv_secs = abstime->tv_sec;
 		timerio->tr_time.tv_micro = abstime->tv_nsec / 1000;
-		SubTime(&timerio->tr_time, &starttime);
+		if (!relative)
+		{
+			struct timeval starttime;
+
+			// GetSysTime can't be used due to the timezone offset in abstime
+			gettimeofday(&starttime, NULL);
+			SubTime(&timerio->tr_time, &starttime);
+		}
 		timermask = 1 << timermp->mp_SigBit;
 		sigs |= timermask;
 		SendIO((struct IORequest *)timerio);
@@ -469,11 +501,25 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const s
 	return 0;
 }
 
+int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abstime)
+{
+	//D(bug("%s(%p, %p, %p)\n", __FUNCTION__, cond, mutex, abstime));
+
+	return _pthread_cond_timedwait(cond, mutex, abstime, FALSE);
+}
+
+int pthread_cond_timedwait_relative_np(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *reltime)
+{
+	//D(bug("%s(%p, %p, %p)\n", __FUNCTION__, cond, mutex, abstime));
+
+	return _pthread_cond_timedwait(cond, mutex, reltime, TRUE);
+}
+
 int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 {
 	//D(bug("%s(%p)\n", __FUNCTION__, cond));
 
-	return pthread_cond_timedwait(cond, mutex, NULL);
+	return _pthread_cond_timedwait(cond, mutex, NULL, FALSE);
 }
 
 static int _pthread_cond_broadcast(pthread_cond_t *cond, BOOL onlyfirst)

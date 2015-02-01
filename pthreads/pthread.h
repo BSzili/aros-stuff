@@ -175,17 +175,6 @@ struct pthread_rwlockattr
 
 typedef struct pthread_rwlockattr pthread_rwlockattr_t;
 
-/*struct pthread_rwlock
-{
-	pthread_mutex_t mutex;
-	handle_t shared_waiters;
-	handle_t exclusive_waiters;
-	int num_shared_waiters;
-	int num_exclusive_waiters;
-	int num_active;
-	pthread_t owner;
-};*/
-
 struct pthread_rwlock
 {
 	pthread_mutex_t exclusive;
@@ -194,7 +183,6 @@ struct pthread_rwlock
 	int exclusive_count;
 	int shared_count;
 	int completed_count;
-//	int nMagic;
 };
 
 typedef struct pthread_rwlock pthread_rwlock_t;
@@ -287,6 +275,15 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex);
 int pthread_mutex_unlock(pthread_mutex_t *mutex);
 
 //
+// Condition variable attribute functions
+//
+
+int pthread_condattr_init(pthread_condattr_t *attr);
+int pthread_condattr_destroy(pthread_condattr_t *attr);
+int pthread_condattr_getpshared(const pthread_condattr_t *attr, int *pshared);
+int pthread_condattr_setpshared(pthread_condattr_t *attr, int pshared);
+
+//
 // Condition variable functions
 //
 
@@ -326,6 +323,7 @@ int pthread_rwlock_unlock(pthread_rwlock_t *lock);
 
 int pthread_setname_np(pthread_t thread, const char *name);
 int pthread_getname_np(pthread_t thread, char *name, size_t len);
+int pthread_cond_timedwait_relative_np(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *reltime);
 
 //
 // Cancellation cleanup
