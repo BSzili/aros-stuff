@@ -642,7 +642,10 @@ int pthread_rwlock_destroy(pthread_rwlock_t *lock)
 	if (lock == NULL)
 		return EINVAL;
 
-	// TODO: check for busy locks
+	if (pthread_mutex_trylock(&lock->exclusive) != 0)
+		return EBUSY;
+
+	pthread_mutex_unlock(&lock->exclusive);
 	pthread_cond_destroy(&lock->shared_completed);
 	pthread_mutex_destroy(&lock->shared);
 	pthread_mutex_destroy(&lock->exclusive);
