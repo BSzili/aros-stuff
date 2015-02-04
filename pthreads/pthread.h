@@ -34,6 +34,7 @@
 
 #define _POSIX_THREADS
 #define _POSIX_READER_WRITER_LOCKS
+#define _POSIX_SPIN_LOCKS
 #define _POSIX_THREAD_ATTR_STACKSIZE
 #define _POSIX_THREAD_PRIORITY_SCHEDULING
 
@@ -191,6 +192,14 @@ typedef struct pthread_rwlock pthread_rwlock_t;
 #define PTHREAD_RWLOCK_INITIALIZER {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0, 0}
 
 //
+// Spinlocks
+//
+
+typedef int pthread_spinlock_t;
+
+#define PTHREAD_SPINLOCK_INITIALIZER 0
+
+//
 // POSIX thread routines
 //
 
@@ -317,6 +326,16 @@ int pthread_rwlock_timedrdlock(pthread_rwlock_t *lock, const struct timespec *ab
 int pthread_rwlock_wrlock(pthread_rwlock_t *lock);
 int pthread_rwlock_timedwrlock(pthread_rwlock_t *lock, const struct timespec *abstime);
 int pthread_rwlock_unlock(pthread_rwlock_t *lock);
+
+//
+// Spinlock functions
+//
+
+int pthread_spin_init(pthread_spinlock_t *lock, int pshared);
+int pthread_spin_destroy(pthread_spinlock_t *lock);
+int pthread_spin_lock(pthread_spinlock_t *lock);
+int pthread_spin_trylock(pthread_spinlock_t *lock);
+int pthread_spin_unlock(pthread_spinlock_t *lock);
 
 //
 // Non-portable functions

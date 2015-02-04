@@ -127,6 +127,37 @@ static pthread_t GetThreadId(struct Task *task)
 	return i;
 }
 
+#if defined __mc68000__
+/* No CAS instruction on m68k */
+static int __m68k_sync_val_compare_and_swap(int *v, int o, int n)
+{
+	int ret;
+
+	Disable();
+	if ((*v) == (o))
+		(*v) = (n);
+	ret = (*v);
+	Enable();
+
+	return ret;
+}
+#undef __sync_val_compare_and_swap
+#define __sync_val_compare_and_swap(v, o, n) __m68k_sync_val_compare_and_swap(v, o, n)
+
+static int __m68k_sync_lock_test_and_set(int *v, int n)
+{
+	Disable();
+	(*v) = (n);
+	Enable();
+
+	return n;
+}
+#undef __sync_lock_test_and_set
+#define __sync_lock_test_and_set(v, n) __m68k_sync_lock_test_and_set(v, n)
+#undef __sync_lock_release
+#define __sync_lock_release(v) __m68k_sync_lock_test_and_set(v, 0)
+#endif
+
 //
 // Thread specific data functions
 //
@@ -793,6 +824,67 @@ int pthread_rwlock_unlock(pthread_rwlock_t *lock)
 }
 
 //
+// Spinlock functions
+//
+
+int pthread_spin_init(pthread_spinlock_t *lock, int pshared)
+{
+	D(bug("%s(%p, %d)\n", __FUNCTION__, lock, pshared));
+
+	if (lock == NULL)
+		return EINVAL;
+
+	*lock = 0;
+
+	return 0;
+}
+
+int pthread_spin_destroy(pthread_spinlock_t *lock)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, lock));
+
+	return 0;
+}
+
+int pthread_spin_lock(pthread_spinlock_t *lock)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, lock));
+
+	if (lock == NULL)
+		return EINVAL;
+
+	while (__sync_lock_test_and_set((int *)lock, 1))
+		sched_yield(); // TODO: don't yield the CPU every iteration
+
+	return 0;
+}
+
+int pthread_spin_trylock(pthread_spinlock_t *lock)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, lock));
+
+	if (lock == NULL)
+		return EINVAL;
+
+	if (__sync_lock_test_and_set((int *)lock, 1))
+		return EBUSY;
+
+	return 0;
+}
+
+int pthread_spin_unlock(pthread_spinlock_t *lock)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, lock));
+
+	if (lock == NULL)
+		return EINVAL;
+
+	__sync_lock_release((int *)lock);
+
+	return 0;
+}
+
+//
 // Thread attribute functions
 //
 
@@ -1128,26 +1220,10 @@ void pthread_exit(void *value_ptr)
 	longjmp(inf->jmp, 1);
 }
 
-#if defined __mc68000__
-/* No CAS instruction on m68k */
-static int __m68k_sync_val_compare_and_swap(int *v, int o, int n)
-{
-	int ret;
-
-	Disable();
-	if ((*v) == (o))
-		(*v) = (n);
-	ret = (*v);
-	Enable();
-
-	return ret;
-}
-#undef __sync_val_compare_and_swap
-#define __sync_val_compare_and_swap(v, o, n) __m68k_sync_val_compare_and_swap(v, o, n)
-#endif
-
 int pthread_once(pthread_once_t *once_control, void (*init_routine)(void))
 {
+	D(bug("%s(%p, %p)\n", __FUNCTION__, once_control, init_routine));
+
 	if (once_control == NULL || init_routine == NULL)
 		return EINVAL;
 
