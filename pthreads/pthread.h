@@ -167,6 +167,29 @@ typedef struct pthread_cond pthread_cond_t;
 #define PTHREAD_COND_INITIALIZER {0, NULL_SEMAPHORE, NULL_MINLIST}
 
 //
+// Barriers
+//
+
+#define PTHREAD_BARRIER_SERIAL_THREAD 1
+
+struct pthread_barrierattr
+{
+	int pshared;
+};
+
+typedef struct pthread_barrierattr pthread_barrierattr_t;
+
+struct pthread_barrier
+{
+	unsigned int curr_height;
+	unsigned int init_height;
+	pthread_cond_t breeched;
+	pthread_mutex_t lock;
+};
+
+typedef struct pthread_barrier pthread_barrier_t;
+
+//
 // Read-write locks
 //
 
@@ -303,6 +326,23 @@ int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);
 int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abstime);
 int pthread_cond_signal(pthread_cond_t *cond);
 int pthread_cond_broadcast(pthread_cond_t *cond);
+
+//
+// Barrier attribute functions
+//
+
+int pthread_barrierattr_init(pthread_barrierattr_t *attr);
+int pthread_barrierattr_destroy(pthread_barrierattr_t *attr);
+int pthread_barrierattr_getpshared(const pthread_barrierattr_t *attr, int *pshared);
+int pthread_barrierattr_setpshared(pthread_barrierattr_t *attr, int pshared);
+
+//
+// Barrier functions
+//
+
+int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t *attr, unsigned int count);
+int pthread_barrier_destroy(pthread_barrier_t *barrier);
+int pthread_barrier_wait(pthread_barrier_t *barrier);
 
 //
 // Read-write lock attribute functions

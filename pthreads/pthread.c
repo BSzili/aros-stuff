@@ -156,6 +156,22 @@ static int __m68k_sync_lock_test_and_set(int *v, int n)
 #define __sync_lock_test_and_set(v, n) __m68k_sync_lock_test_and_set(v, n)
 #undef __sync_lock_release
 #define __sync_lock_release(v) __m68k_sync_lock_test_and_set(v, 0)
+
+static int __m68k_sync_add_and_fetch(int *v, int n)
+{
+	int ret;
+
+	Disable();
+	(*v) += (n);
+	ret = (*v);
+	Enable();
+
+	return ret;
+}
+#undef __sync_add_and_fetch
+#define __sync_add_and_fetch(v, n) __m68k_sync_add_and_fetch(v, n)
+#undef __sync_sub_and_fetch
+#define __sync_sub_and_fetch(v, n) __m68k_sync_add_and_fetch(v, -(n))
 #endif
 
 //
@@ -614,6 +630,71 @@ int pthread_cond_broadcast(pthread_cond_t *cond)
 	//D(bug("%s(%p)\n", __FUNCTION__, cond));
 
 	return _pthread_cond_broadcast(cond, FALSE);
+}
+
+//
+// Barrier functions
+//
+
+int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t *attr, unsigned int count)
+{
+	D(bug("%s(%p, %p, %u)\n", __FUNCTION__, barrier, attr, count));
+
+	if (barrier == NULL || count == 0)
+		return EINVAL;
+
+	barrier->curr_height = barrier->init_height = count;
+	pthread_cond_init(&barrier->breeched, NULL);
+	pthread_mutex_init(&barrier->lock, NULL);
+
+	return 0;
+}
+
+int pthread_barrier_destroy(pthread_barrier_t *barrier)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, barrier));
+
+	if (barrier == NULL)
+		return EINVAL;
+
+	if (pthread_mutex_trylock(&barrier->lock) != 0)
+		return EBUSY;
+
+	pthread_mutex_unlock(&barrier->lock);
+	pthread_cond_destroy(&barrier->breeched);
+	pthread_mutex_destroy(&barrier->lock);
+	barrier->curr_height = barrier->init_height = 0;
+
+	return 0;
+}
+
+int pthread_barrier_wait(pthread_barrier_t *barrier)
+{
+	int result = 0;
+
+	D(bug("%s(%p)\n", __FUNCTION__, barrier));
+
+	if (barrier == NULL)
+		return EINVAL;
+
+	if (__sync_sub_and_fetch(&barrier->curr_height, 1) == 0)
+	{
+		result = pthread_cond_broadcast(&barrier->breeched);
+	}
+	else
+	{
+		pthread_mutex_lock(&barrier->lock);
+		result = pthread_cond_wait(&barrier->breeched, &barrier->lock);
+		pthread_mutex_unlock(&barrier->lock);
+	}
+
+	if (__sync_add_and_fetch(&barrier->curr_height, 1) == barrier->init_height)
+	{
+		if (result == 0)
+			result = PTHREAD_BARRIER_SERIAL_THREAD;
+	}
+
+	return result;
 }
 
 //
