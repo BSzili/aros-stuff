@@ -356,9 +356,14 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex)
 {
 	//D(bug("%s(%p)\n", __FUNCTION__, mutex));
 
-	if (mutex == NULL)
+	if (mutex == NULL || SemaphoreIsInvalid(&mutex->semaphore))
 		return EINVAL;
 
+	// TODO: handle mutexes being used with condition variables
+	if (AttemptSemaphore(&mutex->semaphore) == FALSE)
+		return EBUSY;
+
+	ReleaseSemaphore(&mutex->semaphore);
 	memset(mutex, 0, sizeof(pthread_mutex_t));
 
 	return 0;
@@ -463,13 +468,19 @@ int pthread_cond_destroy(pthread_cond_t *cond)
 {
 	D(bug("%s(%p)\n", __FUNCTION__, cond));
 
-	if (cond == NULL)
+	if (cond == NULL || SemaphoreIsInvalid(&cond->semaphore))
 		return EINVAL;
 
-	// TODO: semaphore protection?
-	if (!IsListEmpty(&cond->waiters))
+	if (AttemptSemaphore(&cond->semaphore) == FALSE)
 		return EBUSY;
 
+	if (!IsListEmpty(&cond->waiters))
+	{
+		ReleaseSemaphore(&cond->semaphore);
+		return EBUSY;
+	}
+
+	ReleaseSemaphore(&cond->semaphore);
 	memset(cond, 0, sizeof(pthread_cond_t));
 
 	return 0;
