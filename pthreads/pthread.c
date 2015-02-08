@@ -1477,27 +1477,9 @@ void pthread_cleanup_pop(int execute)
 
 int pthread_kill(pthread_t thread, int sig)
 {
+	D(bug("%s(%u, %d) not implemented\n", __FUNCTION__, thread, sig));
 
-	ThreadInfo *inf;
-	struct ETask *et;
-
-	D(bug("%s(%u, %d)\n", __FUNCTION__, thread, sig));
-
-#ifdef __AROS__
-	inf = GetThreadInfo(thread);
-
-	if (inf == NULL)
-		return ERANGE;
-
-	et = GetETask(inf->task);
-
-	if (et == NULL)
-		return EINVAL;
-
-	return kill((pid_t)et->et_UniqueID, sig);
-#else
 	return EINVAL;
-#endif
 }
 
 //
