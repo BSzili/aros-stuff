@@ -480,7 +480,7 @@ int pthread_cond_destroy(pthread_cond_t *cond)
 	if (AttemptSemaphore(&cond->semaphore) == FALSE)
 		return EBUSY;
 
-	if (!IsListEmpty(&cond->waiters))
+	if (!IsListEmpty((struct List *)&cond->waiters))
 	{
 		ReleaseSemaphore(&cond->semaphore);
 		return EBUSY;
@@ -522,7 +522,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 			return EINVAL;
 		}
 
-		if (OpenDevice(TIMERNAME, UNIT_MICROHZ, &timerio->tr_node, 0) != 0)
+		if (OpenDevice((STRPTR)TIMERNAME, UNIT_MICROHZ, &timerio->tr_node, 0) != 0)
 		{
 			DeleteMsgPort(timermp);
 			DeleteIORequest((struct IORequest *)timerio);
