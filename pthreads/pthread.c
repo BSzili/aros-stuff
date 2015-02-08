@@ -92,12 +92,16 @@ static struct SignalSemaphore thread_sem;
 
 static int SemaphoreIsInvalid(struct SignalSemaphore *sem)
 {
+	DB2(bug("%s(%p)\n", __FUNCTION__, sem));
+
 	return (!sem || sem->ss_Link.ln_Type != NT_SIGNALSEM || sem->ss_WaitQueue.mlh_Tail != NULL);
 }
 
 static ThreadInfo *GetThreadInfo(pthread_t thread)
 {
 	ThreadInfo *inf = NULL;
+
+	DB2(bug("%s(%u)\n", __FUNCTION__, thread));
 
 	// TODO: more robust error handling?
 	if (thread < PTHREAD_THREADS_MAX)
@@ -109,6 +113,8 @@ static ThreadInfo *GetThreadInfo(pthread_t thread)
 static pthread_t GetThreadId(struct Task *task)
 {
 	pthread_t i;
+
+	DB2(bug("%s(%p)\n", __FUNCTION__, task));
 
 	ObtainSemaphore(&thread_sem);
 
@@ -354,7 +360,7 @@ int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr)
 
 int pthread_mutex_destroy(pthread_mutex_t *mutex)
 {
-	//D(bug("%s(%p)\n", __FUNCTION__, mutex));
+	D(bug("%s(%p)\n", __FUNCTION__, mutex));
 
 	if (mutex == NULL || SemaphoreIsInvalid(&mutex->semaphore))
 		return EINVAL;
@@ -371,7 +377,7 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex)
 
 int pthread_mutex_lock(pthread_mutex_t *mutex)
 {
-	//D(bug("%s(%p)\n", __FUNCTION__, mutex));
+	D(bug("%s(%p)\n", __FUNCTION__, mutex));
 
 	if (mutex == NULL)
 		return EINVAL;
@@ -389,7 +395,7 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
 {
 	ULONG ret;
 
-	//D(bug("%s(%p)\n", __FUNCTION__, mutex));
+	D(bug("%s(%p)\n", __FUNCTION__, mutex));
 
 	if (mutex == NULL)
 		return EINVAL;
@@ -405,7 +411,7 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
 
 int pthread_mutex_unlock(pthread_mutex_t *mutex)
 {
-	//D(bug("%s(%p)\n", __FUNCTION__, mutex));
+	D(bug("%s(%p)\n", __FUNCTION__, mutex));
 
 	if (mutex == NULL)
 		return EINVAL;
@@ -496,7 +502,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	struct timerequest *timerio = NULL;
 	struct Device *TimerBase = NULL;
 
-	//D(bug("%s(%p, %p, %p)\n", __FUNCTION__, cond, mutex, abstime));
+	DB2(bug("%s(%p, %p, %p)\n", __FUNCTION__, cond, mutex, abstime));
 
 	if (cond == NULL || mutex == NULL)
 		return EINVAL;
@@ -586,21 +592,21 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 
 int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abstime)
 {
-	//D(bug("%s(%p, %p, %p)\n", __FUNCTION__, cond, mutex, abstime));
+	D(bug("%s(%p, %p, %p)\n", __FUNCTION__, cond, mutex, abstime));
 
 	return _pthread_cond_timedwait(cond, mutex, abstime, FALSE);
 }
 
 int pthread_cond_timedwait_relative_np(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *reltime)
 {
-	//D(bug("%s(%p, %p, %p)\n", __FUNCTION__, cond, mutex, abstime));
+	D(bug("%s(%p, %p, %p)\n", __FUNCTION__, cond, mutex, reltime));
 
 	return _pthread_cond_timedwait(cond, mutex, reltime, TRUE);
 }
 
 int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 {
-	//D(bug("%s(%p)\n", __FUNCTION__, cond));
+	D(bug("%s(%p)\n", __FUNCTION__, cond));
 
 	return _pthread_cond_timedwait(cond, mutex, NULL, FALSE);
 }
@@ -609,7 +615,7 @@ static int _pthread_cond_broadcast(pthread_cond_t *cond, BOOL onlyfirst)
 {
 	CondWaiter *waiter;
 
-	//D(bug("%s(%p, %d)\n", __FUNCTION__, cond, onlyfirst));
+	DB2(bug("%s(%p, %d)\n", __FUNCTION__, cond, onlyfirst));
 
 	if (cond == NULL)
 		return EINVAL;
@@ -631,14 +637,14 @@ static int _pthread_cond_broadcast(pthread_cond_t *cond, BOOL onlyfirst)
 
 int pthread_cond_signal(pthread_cond_t *cond)
 {
-	//D(bug("%s(%p)\n", __FUNCTION__, cond));
+	D(bug("%s(%p)\n", __FUNCTION__, cond));
 
 	return _pthread_cond_broadcast(cond, TRUE);
 }
 
 int pthread_cond_broadcast(pthread_cond_t *cond)
 {
-	//D(bug("%s(%p)\n", __FUNCTION__, cond));
+	D(bug("%s(%p)\n", __FUNCTION__, cond));
 
 	return _pthread_cond_broadcast(cond, FALSE);
 }
@@ -985,7 +991,7 @@ int pthread_spin_unlock(pthread_spinlock_t *lock)
 
 int pthread_attr_init(pthread_attr_t *attr)
 {
-	struct Task *task = FindTask(NULL);
+	struct Task *task;
 
 	D(bug("%s(%p)\n", __FUNCTION__, attr));
 
@@ -994,6 +1000,7 @@ int pthread_attr_init(pthread_attr_t *attr)
 
 	memset(attr, 0, sizeof(pthread_attr_t));
 	// inherit the priority and stack size of the parent thread
+	task = FindTask(NULL);
 	attr->param.sched_priority = task->tc_Node.ln_Pri;
 	attr->stacksize = (UBYTE *)task->tc_SPUpper - (UBYTE *)task->tc_SPLower;
 
@@ -1110,7 +1117,7 @@ static void StarterFunc(void)
 {
 	ThreadInfo *inf;
 
-	D(bug("%s()\n", __FUNCTION__));
+	DB2(bug("%s()\n", __FUNCTION__));
 
 	inf = (ThreadInfo *)FindTask(NULL)->tc_UserData;
 	// trim the name
@@ -1499,7 +1506,7 @@ int pthread_kill(pthread_t thread, int sig)
 
 static int _Init_Func(void)
 {
-	D(bug("%s()\n", __FUNCTION__));
+	DB2(bug("%s()\n", __FUNCTION__));
 
 	memset(&threads, 0, sizeof(threads));
 	InitSemaphore(&thread_sem);
@@ -1513,7 +1520,7 @@ static void _Exit_Func(void)
 	pthread_t i;
 #endif
 
-	D(bug("%s()\n", __FUNCTION__));
+	DB2(bug("%s()\n", __FUNCTION__));
 
 	// wait for the threads?
 #if 0
