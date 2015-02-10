@@ -25,6 +25,7 @@
 #include <time.h>
 #include <limits.h>
 
+#undef _POSIX_SEMAPHORES
 #define _POSIX_SEMAPHORES
 
 #undef SEM_VALUE_MAX
