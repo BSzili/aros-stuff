@@ -1371,7 +1371,7 @@ int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param
 int pthread_setname_np(pthread_t thread, const char *name)
 {
 	ThreadInfo *inf;
-	char *currentName;
+	char *currentname;
 	size_t namelen;
 
 	D(bug("%s(%u, %s)\n", __FUNCTION__, thread, name));
@@ -1384,17 +1384,17 @@ int pthread_setname_np(pthread_t thread, const char *name)
 	if (inf == NULL)
 		return ERANGE;
 
-	currentName = inf->task->tc_Node.ln_Name;
+	currentname = inf->task->tc_Node.ln_Name;
 
 	if (inf->msgport == NULL)
-		namelen = strlen(currentName) + 1;
+		namelen = strlen(currentname) + 1;
 	else
 		namelen = NAMELEN;
 
 	if (strlen(name) + 1 > namelen)
 		return ERANGE;
 
-	strncpy(currentName, name, namelen);
+	strncpy(currentname, name, namelen);
 
 	return 0;
 }
@@ -1402,7 +1402,7 @@ int pthread_setname_np(pthread_t thread, const char *name)
 int pthread_getname_np(pthread_t thread, char *name, size_t len)
 {
 	ThreadInfo *inf;
-	char *currentName;
+	char *currentname;
 
 	D(bug("%s(%u, %p, %u)\n", __FUNCTION__, thread, name, len));
 
@@ -1414,13 +1414,13 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len)
 	if (inf == NULL)
 		return ERANGE;
 
-	currentName = inf->task->tc_Node.ln_Name;
+	currentname = inf->task->tc_Node.ln_Name;
 
-	if (strlen(currentName) + 1 > len)
+	if (strlen(currentname) + 1 > len)
 		return ERANGE;
 
 	// TODO: partially copy the name?
-	strncpy(name, currentName, len);
+	strncpy(name, currentname, len);
 
 	return 0;
 }
