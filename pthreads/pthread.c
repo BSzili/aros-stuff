@@ -1283,8 +1283,11 @@ pthread_t pthread_self(void)
 		{
 			// TODO: pthread_self is supposed to always succeed, but we can fail
 			// here if we run out of thread slots
+			// this can only happen if too many non-thread processes call
+			// this function
 			//ReleaseSemaphore(&thread_sem);
 			//return EAGAIN;
+			abort();
 		}
 		inf = GetThreadInfo(thread);
 		memset(inf, 0, sizeof(ThreadInfo));
