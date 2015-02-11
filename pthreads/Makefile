@@ -5,7 +5,7 @@ OSTYPE = $(shell uname -s)
 
 CFLAGS = -Wall -I.
 
-ifeq ($(DEBUG), 1)
+ifneq ($(DEBUG), 0)
 CFLAGS += -g -DDEBUG
 else
 CFLAGS += -O2
