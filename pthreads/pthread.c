@@ -1039,12 +1039,14 @@ int pthread_attr_setdetachstate(pthread_attr_t *attr, int detachstate)
 	if (attr == NULL || detachstate != PTHREAD_CREATE_JOINABLE)
 		return EINVAL;
 
+	attr->detachstate = detachstate;
+
 	return 0;
 }
 
 int pthread_attr_getstack(const pthread_attr_t *attr, void **stackaddr, size_t *stacksize)
 {
-	D(bug("%s(%p, %p)\n", __FUNCTION__, attr, stackaddr));
+	D(bug("%s(%p, %p, %p)\n", __FUNCTION__, attr, stackaddr, stacksize));
 
 	if (attr == NULL)
 		return EINVAL;
@@ -1060,7 +1062,7 @@ int pthread_attr_getstack(const pthread_attr_t *attr, void **stackaddr, size_t *
 
 int pthread_attr_setstack(pthread_attr_t *attr, void *stackaddr, size_t stacksize)
 {
-	D(bug("%s(%p, %p)\n", __FUNCTION__, attr, stackaddr));
+	D(bug("%s(%p, %p, %u)\n", __FUNCTION__, attr, stackaddr, stacksize));
 
 	if (attr == NULL || (stackaddr != NULL && stacksize == 0))
 		return EINVAL;
@@ -1089,10 +1091,11 @@ int pthread_attr_getschedparam(const pthread_attr_t *attr, struct sched_param *p
 {
 	D(bug("%s(%p, %p)\n", __FUNCTION__, attr, param));
 
-	if (attr == NULL || param == NULL)
+	if (attr == NULL)
 		return EINVAL;
 
-	*param = attr->param;
+	if (param != NULL)
+		*param = attr->param;
 
 	return 0;
 }
