@@ -44,9 +44,11 @@
 #include "debug.h"
 
 #define FALLBACKSIGNAL SIGBREAKB_CTRL_E
+#define PARENTSIGNAL SIGBREAKB_CTRL_F
 #define NAMELEN 32
 #define PTHREAD_INVALID_ID ((pthread_t)-1)
 #define PTHREAD_FIRST_THREAD_ID (1)
+//#define USE_MSGPORT
 
 typedef struct
 {
@@ -73,8 +75,13 @@ typedef struct
 {
 	void *(*start)(void *);
 	void *arg;
+#ifdef USE_MSGPORT
 	struct MsgPort *msgport;
 	struct Message msg;
+#else
+	struct Task *parent;
+	int finished;
+#endif
 	struct Task *task;
 	void *ret;
 	jmp_buf jmp;
@@ -1150,7 +1157,12 @@ static void StarterFunc(void)
 	}
 
 	Forbid();
+#ifdef USE_MSGPORT
 	ReplyMsg(&inf->msg);
+#else
+	inf->finished = TRUE;
+	Signal(inf->parent, PARENTSIGNAL);
+#endif
 }
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)(void *), void *arg)
@@ -1190,6 +1202,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	memset(name + oldlen, ' ', sizeof(name) - oldlen - 1);
 	name[sizeof(name) - 1] = '\0';
 
+#ifdef USE_MSGPORT
 	inf->msgport = CreateMsgPort();
 	if (!inf->msgport)
 	{
@@ -1200,6 +1213,9 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	inf->msg.mn_Node.ln_Type = NT_MESSAGE;
 	inf->msg.mn_ReplyPort = inf->msgport;
 	inf->msg.mn_Length = sizeof(inf->msg);
+#else
+	inf->parent = FindTask(NULL);
+#endif
 
 	inf->task = (struct Task *)CreateNewProcTags(NP_Entry, StarterFunc,
 #ifdef __MORPHOS__
@@ -1216,8 +1232,10 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 
 	if (!inf->task)
 	{
+#ifdef USE_MSGPORT
 		DeleteMsgPort(inf->msgport);
 		inf->msgport = NULL;
+#endif
 		return EAGAIN;
 	}
 
@@ -1241,11 +1259,19 @@ int pthread_join(pthread_t thread, void **value_ptr)
 
 	inf = GetThreadInfo(thread);
 
+#ifdef USE_MSGPORT
 	if (inf == NULL || inf->msgport == NULL)
 		return ESRCH;
 
 	WaitPort(inf->msgport);
 	DeleteMsgPort(inf->msgport);
+#else
+	if (inf == NULL)
+		return ESRCH;
+
+	while (!inf->finished)
+		Wait(PARENTSIGNAL);
+#endif
 
 	if (value_ptr)
 		*value_ptr = inf->ret;
@@ -1391,9 +1417,11 @@ int pthread_setname_np(pthread_t thread, const char *name)
 
 	currentname = inf->task->tc_Node.ln_Name;
 
+#ifdef USE_MSGPORT
 	if (inf->msgport == NULL)
 		namelen = strlen(currentname) + 1;
 	else
+#endif
 		namelen = NAMELEN;
 
 	if (strlen(name) + 1 > namelen)
