@@ -699,7 +699,10 @@ int pthread_barrier_destroy(pthread_barrier_t *barrier)
 		return EBUSY;
 
 	pthread_mutex_unlock(&barrier->lock);
-	pthread_cond_destroy(&barrier->breeched);
+
+	if (pthread_cond_destroy(&barrier->breeched) != 0)
+		return EBUSY;
+
 	pthread_mutex_destroy(&barrier->lock);
 	barrier->curr_height = barrier->init_height = 0;
 
