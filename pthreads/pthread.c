@@ -1503,7 +1503,7 @@ void pthread_cleanup_push(void (*routine)(void *), void *arg)
 	if (routine == NULL)
 		return;
 
-	handler = calloc(1, sizeof(CleanupHandler));
+	handler = malloc(sizeof(CleanupHandler));
 
 	if (handler == NULL)
 		return;
@@ -1511,6 +1511,8 @@ void pthread_cleanup_push(void (*routine)(void *), void *arg)
 	thread = pthread_self();
 	inf = GetThreadInfo(thread);
 
+	handler->routine = routine;
+	handler->arg = arg;
 	AddTail((struct List *)&inf->cleanup, (struct Node *)handler);
 }
 
