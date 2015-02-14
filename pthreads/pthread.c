@@ -366,6 +366,7 @@ int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr)
 	if (mutex == NULL)
 		return EINVAL;
 
+	mutex->incond = FALSE;
 	InitSemaphore(&mutex->semaphore);
 
 	return 0;
@@ -378,9 +379,14 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex)
 	if (mutex == NULL || SemaphoreIsInvalid(&mutex->semaphore))
 		return EINVAL;
 
-	// TODO: handle mutexes being used with condition variables
-	if (AttemptSemaphore(&mutex->semaphore) == FALSE)
+	if (mutex->incond == TRUE || AttemptSemaphore(&mutex->semaphore) == FALSE)
 		return EBUSY;
+
+	/*if (mutex->incond == TRUE)
+	{
+		ReleaseSemaphore(&mutex->semaphore);
+		return EBUSY;
+	}*/
 
 	ReleaseSemaphore(&mutex->semaphore);
 	memset(mutex, 0, sizeof(pthread_mutex_t));
@@ -574,9 +580,11 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	AddTail((struct List *)&cond->waiters, (struct Node *)&waiter);
 	ReleaseSemaphore(&cond->semaphore);
 
+	mutex->incond = TRUE;
 	pthread_mutex_unlock(mutex);
 	sigs = Wait(sigs);
 	pthread_mutex_lock(mutex);
+	mutex->incond = FALSE;
 
 	ObtainSemaphore(&cond->semaphore);
 	Remove((struct Node *)&waiter);

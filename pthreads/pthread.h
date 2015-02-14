@@ -130,7 +130,7 @@ typedef struct pthread_mutexattr pthread_mutexattr_t;
 
 struct pthread_mutex
 {
-	int kind;
+	int incond;
 	struct SignalSemaphore semaphore;
 };
 
