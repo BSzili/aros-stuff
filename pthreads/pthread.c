@@ -1162,7 +1162,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 
 	D(bug("%s(%p, %p, %p, %p)\n", __FUNCTION__, thread, attr, start, arg));
 
-	if (start == NULL)
+	if (thread == NULL || start == NULL)
 		return EINVAL;
 
 	ObtainSemaphore(&thread_sem);
@@ -1221,8 +1221,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 		return EAGAIN;
 	}
 
-	if (thread != NULL)
-		*thread = threadnew;
+	*thread = threadnew;
 
 	return 0;
 }
