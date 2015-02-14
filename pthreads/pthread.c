@@ -59,7 +59,6 @@ typedef struct
 
 typedef struct
 {
-	void *value;
 	void (*destructor)(void *);
 	BOOL used;
 } TLSKey;
@@ -86,12 +85,14 @@ typedef struct
 	void *ret;
 	jmp_buf jmp;
 	pthread_attr_t attr;
-	TLSKey tls[PTHREAD_KEYS_MAX];
+	void *tlsvalues[PTHREAD_KEYS_MAX];
 	struct MinList cleanup;
 } ThreadInfo;
 
 static ThreadInfo threads[PTHREAD_THREADS_MAX];
 static struct SignalSemaphore thread_sem;
+static TLSKey tlskeys[PTHREAD_KEYS_MAX];
+static struct SignalSemaphore tls_sem;
 
 //
 // Helper functions
@@ -193,8 +194,6 @@ static int __m68k_sync_add_and_fetch(int *v, int n)
 
 int pthread_key_create(pthread_key_t *key, void (*destructor)(void *))
 {
-	pthread_t thread;
-	ThreadInfo *inf;
 	TLSKey *tls;
 	int i;
 
@@ -203,21 +202,25 @@ int pthread_key_create(pthread_key_t *key, void (*destructor)(void *))
 	if (key == NULL)
 		return EINVAL;
 
-	thread = pthread_self();
-	inf = GetThreadInfo(thread);
+	ObtainSemaphore(&tls_sem);
 
 	for (i = 0; i < PTHREAD_KEYS_MAX; i++)
 	{
-		if (inf->tls[i].used == FALSE)
+		if (tlskeys[i].used == FALSE)
 			break;
 	}
 
 	if (i >= PTHREAD_KEYS_MAX)
+	{
+		ReleaseSemaphore(&tls_sem);
 		return EAGAIN;
+	}
 
-	tls = &inf->tls[i];
+	tls = &tlskeys[i];
 	tls->used = TRUE;
 	tls->destructor = destructor;
+
+	ReleaseSemaphore(&tls_sem);
 
 	*key = i;
 
@@ -226,8 +229,6 @@ int pthread_key_create(pthread_key_t *key, void (*destructor)(void *))
 
 int pthread_key_delete(pthread_key_t key)
 {
-	pthread_t thread;
-	ThreadInfo *inf;
 	TLSKey *tls;
 
 	D(bug("%s(%u)\n", __FUNCTION__, key));
@@ -235,18 +236,20 @@ int pthread_key_delete(pthread_key_t key)
 	if (key >= PTHREAD_KEYS_MAX)
 		return EINVAL;
 
-	thread = pthread_self();
-	inf = GetThreadInfo(thread);
-	tls = &inf->tls[key];
+	tls = &tlskeys[key];
+
+	ObtainSemaphore(&tls_sem);
 
 	if (tls->used == FALSE)
+	{
+		ReleaseSemaphore(&tls_sem);
 		return EINVAL;
-
-	if (tls->destructor)
-		tls->destructor(tls->value);
+	}
 
 	tls->used = FALSE;
 	tls->destructor = NULL;
+
+	ReleaseSemaphore(&tls_sem);
 
 	return 0;
 }
@@ -262,14 +265,21 @@ int pthread_setspecific(pthread_key_t key, const void *value)
 	if (key >= PTHREAD_KEYS_MAX)
 		return EINVAL;
 
+	ObtainSemaphore(&tls_sem);
+
 	thread = pthread_self();
-	inf = GetThreadInfo(thread);
-	tls = &inf->tls[key];
+	tls = &tlskeys[key];
 
 	if (tls->used == FALSE)
+	{
+		ReleaseSemaphore(&tls_sem);
 		return EINVAL;
+	}
 
-	tls->value = (void *)value;
+	ReleaseSemaphore(&tls_sem);
+
+	inf = GetThreadInfo(thread);
+	inf->tlsvalues[key] = (void *)value;
 
 	return 0;
 }
@@ -278,7 +288,6 @@ void *pthread_getspecific(pthread_key_t key)
 {
 	pthread_t thread;
 	ThreadInfo *inf;
-	TLSKey *tls;
 	void *value = NULL;
 
 	D(bug("%s(%u)\n", __FUNCTION__, key));
@@ -288,10 +297,7 @@ void *pthread_getspecific(pthread_key_t key)
 
 	thread = pthread_self();
 	inf = GetThreadInfo(thread);
-	tls = &inf->tls[key];
-
-	if (tls->used == TRUE)
-		value = tls->value;
+	value = inf->tlsvalues[key];
 
 	return value;
 }
@@ -1126,6 +1132,7 @@ int pthread_attr_setschedparam(pthread_attr_t *attr, const struct sched_param *p
 static void StarterFunc(void)
 {
 	ThreadInfo *inf;
+	int i;
 
 	DB2(bug("%s()\n", __FUNCTION__));
 
@@ -1155,6 +1162,16 @@ static void StarterFunc(void)
 			inf->ret = inf->start(inf->arg);
 		}
 	}
+
+	ObtainSemaphore(&tls_sem);
+
+	for (i = 0; i < PTHREAD_KEYS_MAX; i++)
+	{
+		if (tlskeys[i].used && tlskeys[i].destructor && inf->tlsvalues[i])
+			tlskeys[i].destructor(inf->tlsvalues[i]);
+	}
+
+	ReleaseSemaphore(&tls_sem);
 
 	Forbid();
 #ifdef USE_MSGPORT
@@ -1523,8 +1540,9 @@ static int _Init_Func(void)
 {
 	DB2(bug("%s()\n", __FUNCTION__));
 
-	memset(&threads, 0, sizeof(threads));
+	//memset(&threads, 0, sizeof(threads));
 	InitSemaphore(&thread_sem);
+	InitSemaphore(&tls_sem);
 
 	return TRUE;
 }
