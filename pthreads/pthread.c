@@ -805,12 +805,16 @@ int pthread_rwlockattr_destroy(pthread_rwlockattr_t *attr)
 
 int pthread_rwlock_init(pthread_rwlock_t *lock, const pthread_rwlockattr_t *attr)
 {
+	pthread_mutexattr_t mattr; 
+
 	D(bug("%s(%p, %p)\n", __FUNCTION__, lock, attr));
 
 	if (lock == NULL)
 		return EINVAL;
 
-	pthread_mutex_init(&lock->exclusive, NULL);
+	pthread_mutexattr_init(&mattr);
+	pthread_mutexattr_settype(&mattr, PTHREAD_MUTEX_ERRORCHECK); 
+	pthread_mutex_init(&lock->exclusive, &mattr);
 	pthread_mutex_init(&lock->shared, NULL);
 	pthread_cond_init(&lock->shared_completed, NULL);
 	lock->exclusive_count = lock->shared_count = lock->completed_count = 0;
@@ -933,7 +937,8 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *lock)
 	if (SemaphoreIsInvalid(&lock->exclusive.semaphore))
 		pthread_rwlock_init(lock, NULL);
 
-	pthread_mutex_lock(&lock->exclusive);
+	if (pthread_mutex_lock(&lock->exclusive) != 0)
+		return EDEADLK;
 
 	if (lock->shared_count++ == /*INT_MAX*/ (int)0x7FFFFFFF)
 	{
@@ -960,7 +965,8 @@ int pthread_rwlock_wrlock(pthread_rwlock_t *lock)
 	if (SemaphoreIsInvalid(&lock->exclusive.semaphore))
 		pthread_rwlock_init(lock, NULL);
 
-	pthread_mutex_lock(&lock->exclusive);
+	if (pthread_mutex_lock(&lock->exclusive) != 0)
+		return EDEADLK;
 	pthread_mutex_lock(&lock->shared);
 
 	if (lock->exclusive_count == 0)
