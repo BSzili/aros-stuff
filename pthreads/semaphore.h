@@ -31,8 +31,12 @@
 #undef SEM_VALUE_MAX
 #define SEM_VALUE_MAX INT_MAX
 
+#undef SEM_FAILED
+#define SEM_FAILED ((sem_t *)(-1))
+
 struct sema
 {
+	struct Node node;
 	int value;
 	int waiters_count;
 	pthread_mutex_t lock;
@@ -51,7 +55,7 @@ int sem_trywait(sem_t *sem);
 int sem_wait(sem_t *sem);
 int sem_timedwait(sem_t *sem, const struct timespec *abstime);
 int sem_post(sem_t *sem);
-int sem_open(const char *name, int oflag, mode_t mode, unsigned int value);
+sem_t *sem_open(const char *name, int oflag, mode_t mode, unsigned int value);
 int sem_close(sem_t *sem);
 int sem_unlink(const char *name);
 int sem_getvalue(sem_t *sem, int *sval);

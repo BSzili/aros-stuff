@@ -18,12 +18,131 @@
 	3. This notice may not be removed or altered from any source distribution.
 */
 
+#include <proto/exec.h>
+#include <clib/alib_protos.h>
+
+#include <stdlib.h>
+#include <fcntl.h>
+
 #include "semaphore.h"
 #include "debug.h"
 
 #ifndef EOVERFLOW
 #define EOVERFLOW EINVAL
 #endif
+
+static struct List semaphores;
+static struct SignalSemaphore sema_sem;
+static pthread_once_t once_control = PTHREAD_ONCE_INIT;
+
+static void _Init_Semaphore(void)
+{
+	DB2(bug("%s()\n", __FUNCTION__));
+
+	InitSemaphore(&sema_sem);
+	NewList(&semaphores);
+}
+
+sem_t *sem_open(const char *name, int oflag, mode_t mode, unsigned int value)
+{
+	sem_t *sem;
+
+	D(bug("%s(%s, %d, %u, %u)\n", __FUNCTION__, name, oflag, mode, value));
+
+	pthread_once(&once_control, _Init_Semaphore);
+
+	if (name == NULL)
+	{
+		errno = EINVAL;
+		return SEM_FAILED;
+	}
+
+	ObtainSemaphore(&sema_sem);
+	sem = (sem_t *)FindName(&semaphores, (STRPTR)name);
+	if (sem != NULL)
+	{
+		if ((oflag & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL))
+		{
+			ReleaseSemaphore(&sema_sem);
+			errno = EEXIST;
+			return SEM_FAILED;
+		}
+	}
+	else
+	{
+		if (!(oflag & O_CREAT))
+		{
+			ReleaseSemaphore(&sema_sem);
+			errno = ENOENT;
+			return SEM_FAILED;
+		}
+		
+		sem = malloc(sizeof(sem_t));
+		if (sem == NULL)
+		{
+			ReleaseSemaphore(&sema_sem);
+			errno = ENOMEM;
+			return SEM_FAILED;
+		}
+
+		if (sem_init(sem, 0, value))
+		{
+			free(sem);
+			ReleaseSemaphore(&sema_sem);
+			return SEM_FAILED;
+		}
+		// TODO: this string should be duplicated
+		sem->node.ln_Name = (char *)name;
+		AddTail(&semaphores, (struct Node *)sem);
+		ReleaseSemaphore(&sema_sem);
+	}
+
+	return sem;
+}
+
+int sem_close(sem_t *sem)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, sem));
+
+	return 0;
+}
+
+int sem_unlink(const char *name)
+{
+	sem_t *sem;
+
+	D(bug("%s(%s)\n", __FUNCTION__, name));
+
+	pthread_once(&once_control, _Init_Semaphore);
+
+	if (name == NULL)
+	{
+		errno = EINVAL;
+		return -1;
+	}
+
+	ObtainSemaphore(&sema_sem);
+	sem = (sem_t *)FindName(&semaphores, (STRPTR)name);
+
+	if (sem == NULL)
+	{
+		ReleaseSemaphore(&sema_sem);
+		errno = ENOENT;
+		return -1;
+	}
+
+	if (sem_destroy(sem) != 0)
+	{
+		ReleaseSemaphore(&sema_sem);
+		return -1;
+	}
+
+	Remove((struct Node *)sem);
+	free(sem);
+	ReleaseSemaphore(&sema_sem);
+
+	return 0;
+}
 
 int sem_init(sem_t *sem, int pshared, unsigned int value)
 {
