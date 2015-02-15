@@ -747,6 +747,34 @@ int pthread_barrier_wait(pthread_barrier_t *barrier)
 }
 
 //
+// Read-write lock attribute functions
+//
+
+int pthread_rwlockattr_init(pthread_rwlockattr_t *attr)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, attr));
+
+	if (attr == NULL)
+		return EINVAL;
+
+	memset(attr, 0, sizeof(pthread_rwlockattr_t));
+
+	return 0;
+}
+
+int pthread_rwlockattr_destroy(pthread_rwlockattr_t *attr)
+{
+	D(bug("%s(%p)\n", __FUNCTION__, attr));
+
+	if (attr == NULL)
+		return EINVAL;
+
+	memset(attr, 0, sizeof(pthread_rwlockattr_t));
+
+	return 0;
+}
+
+//
 // Read-write lock functions
 //
 
