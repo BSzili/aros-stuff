@@ -376,8 +376,12 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex)
 {
 	D(bug("%s(%p)\n", __FUNCTION__, mutex));
 
-	if (mutex == NULL || SemaphoreIsInvalid(&mutex->semaphore))
+	if (mutex == NULL)
 		return EINVAL;
+
+	// probably a statically allocated mutex
+	if (SemaphoreIsInvalid(&mutex->semaphore))
+		return 0;
 
 	if (mutex->incond == TRUE || AttemptSemaphore(&mutex->semaphore) == FALSE)
 		return EBUSY;
@@ -493,8 +497,12 @@ int pthread_cond_destroy(pthread_cond_t *cond)
 {
 	D(bug("%s(%p)\n", __FUNCTION__, cond));
 
-	if (cond == NULL || SemaphoreIsInvalid(&cond->semaphore))
+	if (cond == NULL)
 		return EINVAL;
+
+	// probably a statically allocated condition
+	if (SemaphoreIsInvalid(&cond->semaphore))
+		return 0;
 
 	if (AttemptSemaphore(&cond->semaphore) == FALSE)
 		return EBUSY;
