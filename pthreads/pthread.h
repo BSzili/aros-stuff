@@ -117,7 +117,7 @@ typedef struct pthread_once pthread_once_t;
 
 #define PTHREAD_MUTEX_NORMAL     0
 #define PTHREAD_MUTEX_RECURSIVE  1
-//#define PTHREAD_MUTEX_ERRORCHECK 2
+#define PTHREAD_MUTEX_ERRORCHECK 2
 #define PTHREAD_MUTEX_DEFAULT    PTHREAD_MUTEX_NORMAL
 
 struct pthread_mutexattr
@@ -130,8 +130,9 @@ typedef struct pthread_mutexattr pthread_mutexattr_t;
 
 struct pthread_mutex
 {
-	int incond;
+	int kind;
 	struct SignalSemaphore semaphore;
+	int incond;
 };
 
 typedef struct pthread_mutex pthread_mutex_t;

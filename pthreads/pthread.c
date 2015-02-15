@@ -105,6 +105,17 @@ static int SemaphoreIsInvalid(struct SignalSemaphore *sem)
 	return (!sem || sem->ss_Link.ln_Type != NT_SIGNALSEM || sem->ss_WaitQueue.mlh_Tail != NULL);
 }
 
+static int SemaphoreIsMine(struct SignalSemaphore *sem)
+{
+	struct Task *me;
+
+	DB2(bug("%s(%p)\n", __FUNCTION__, sem));
+
+	me = FindTask(NULL);
+
+	return (sem && sem->ss_NestCount > 0 && sem->ss_Owner == me);
+}
+
 static ThreadInfo *GetThreadInfo(pthread_t thread)
 {
 	ThreadInfo *inf = NULL;
@@ -347,7 +358,7 @@ int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int kind)
 {
 	D(bug("%s(%p)\n", __FUNCTION__, attr));
 
-	if (attr == NULL)
+	if (attr == NULL || !(kind >= PTHREAD_MUTEX_NORMAL && kind <= PTHREAD_MUTEX_ERRORCHECK))
 		return EINVAL;
 
 	attr->kind = kind;
@@ -366,8 +377,12 @@ int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr)
 	if (mutex == NULL)
 		return EINVAL;
 
-	mutex->incond = FALSE;
+	if (attr)
+		mutex->kind = attr->kind;
+	else
+		mutex->kind = 0;
 	InitSemaphore(&mutex->semaphore);
+	mutex->incond = FALSE;
 
 	return 0;
 }
@@ -409,6 +424,10 @@ int pthread_mutex_lock(pthread_mutex_t *mutex)
 	if (SemaphoreIsInvalid(&mutex->semaphore))
 		pthread_mutex_init(mutex, NULL);
 
+	// normal mutexes would simply deadlock here
+	if (mutex->kind == PTHREAD_MUTEX_ERRORCHECK && SemaphoreIsMine(&mutex->semaphore))
+		return EDEADLK;
+
 	ObtainSemaphore(&mutex->semaphore);
 
 	return 0;
@@ -427,6 +446,9 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
 	if (SemaphoreIsInvalid(&mutex->semaphore))
 		pthread_mutex_init(mutex, NULL);
 
+	if (mutex->kind != PTHREAD_MUTEX_RECURSIVE && SemaphoreIsMine(&mutex->semaphore))
+		return EBUSY;
+
 	ret = AttemptSemaphore(&mutex->semaphore);
 
 	return (ret == TRUE) ? 0 : EBUSY;
@@ -442,6 +464,9 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex)
 	// initialize static mutexes
 	if (SemaphoreIsInvalid(&mutex->semaphore))
 		pthread_mutex_init(mutex, NULL);
+
+	if (mutex->kind == PTHREAD_MUTEX_ERRORCHECK && !SemaphoreIsMine(&mutex->semaphore))
+		return EPERM;
 
 	ReleaseSemaphore(&mutex->semaphore);
 
