@@ -828,7 +828,21 @@ int pthread_rwlock_destroy(pthread_rwlock_t *lock)
 	if (pthread_mutex_trylock(&lock->exclusive) != 0)
 		return EBUSY;
 
+	if (pthread_mutex_trylock(&lock->shared) != 0)
+	{
+		pthread_mutex_unlock(&lock->exclusive);
+		return EBUSY;
+	}
+
+	if (lock->exclusive_count > 0 || lock->shared_count > lock->completed_count)
+	{
+		pthread_mutex_unlock(&lock->shared);
+		pthread_mutex_unlock(&lock->exclusive);
+		return EBUSY;
+	}
+
 	pthread_mutex_unlock(&lock->exclusive);
+	pthread_mutex_unlock(&lock->shared);
 	pthread_cond_destroy(&lock->shared_completed);
 	pthread_mutex_destroy(&lock->shared);
 	pthread_mutex_destroy(&lock->exclusive);
