@@ -913,6 +913,7 @@ int pthread_rwlock_trywrlock(pthread_rwlock_t *lock)
 	{
 		pthread_mutex_unlock(&lock->shared);
 		pthread_mutex_unlock(&lock->exclusive);
+		return EBUSY;
 	}
 	else
 	{
