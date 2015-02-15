@@ -1271,6 +1271,8 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 #ifdef USE_MSGPORT
 		DeleteMsgPort(inf->msgport);
 		inf->msgport = NULL;
+#else
+		inf->parent = NULL;
 #endif
 		return EAGAIN;
 	}
@@ -1302,7 +1304,7 @@ int pthread_join(pthread_t thread, void **value_ptr)
 	WaitPort(inf->msgport);
 	DeleteMsgPort(inf->msgport);
 #else
-	if (inf == NULL)
+	if (inf == NULL || inf->parent == NULL)
 		return ESRCH;
 
 	while (!inf->finished)
@@ -1455,9 +1457,11 @@ int pthread_setname_np(pthread_t thread, const char *name)
 
 #ifdef USE_MSGPORT
 	if (inf->msgport == NULL)
+#else
+	if (inf->parent == NULL)
+#endif
 		namelen = strlen(currentname) + 1;
 	else
-#endif
 		namelen = NAMELEN;
 
 	if (strlen(name) + 1 > namelen)
