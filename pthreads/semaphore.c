@@ -113,7 +113,7 @@ int sem_timedwait(sem_t *sem, const struct timespec *abstime)
 
 	sem->waiters_count++;
 
-	while (sem->value == 0)
+	while (sem->value == 0 && result == 0)
 		result = pthread_cond_timedwait(&sem->count_nonzero, &sem->lock, abstime);
 
 	sem->waiters_count--;
