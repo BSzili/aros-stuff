@@ -805,19 +805,12 @@ int pthread_rwlockattr_destroy(pthread_rwlockattr_t *attr)
 
 int pthread_rwlock_init(pthread_rwlock_t *lock, const pthread_rwlockattr_t *attr)
 {
-	pthread_mutexattr_t mattr; 
-
 	D(bug("%s(%p, %p)\n", __FUNCTION__, lock, attr));
 
 	if (lock == NULL)
 		return EINVAL;
 
-	pthread_mutexattr_init(&mattr);
-	pthread_mutexattr_settype(&mattr, PTHREAD_MUTEX_ERRORCHECK); 
-	pthread_mutex_init(&lock->exclusive, &mattr);
-	pthread_mutex_init(&lock->shared, NULL);
-	pthread_cond_init(&lock->shared_completed, NULL);
-	lock->exclusive_count = lock->shared_count = lock->completed_count = 0;
+	InitSemaphore(&lock->semaphore);
 
 	return 0;
 }
@@ -829,102 +822,53 @@ int pthread_rwlock_destroy(pthread_rwlock_t *lock)
 	if (lock == NULL)
 		return EINVAL;
 
-	if (pthread_mutex_trylock(&lock->exclusive) != 0)
+	// probably a statically allocated rwlock
+	if (SemaphoreIsInvalid(&lock->semaphore))
+		return 0;
+
+	if (AttemptSemaphore(&lock->semaphore) == FALSE)
 		return EBUSY;
 
-	if (pthread_mutex_trylock(&lock->shared) != 0)
-	{
-		pthread_mutex_unlock(&lock->exclusive);
-		return EBUSY;
-	}
-
-	if (lock->exclusive_count > 0 || lock->shared_count > lock->completed_count)
-	{
-		pthread_mutex_unlock(&lock->shared);
-		pthread_mutex_unlock(&lock->exclusive);
-		return EBUSY;
-	}
-
-	pthread_mutex_unlock(&lock->exclusive);
-	pthread_mutex_unlock(&lock->shared);
-	pthread_cond_destroy(&lock->shared_completed);
-	pthread_mutex_destroy(&lock->shared);
-	pthread_mutex_destroy(&lock->exclusive);
-	lock->exclusive_count = lock->shared_count = lock->completed_count = 0;
+	ReleaseSemaphore(&lock->semaphore);
+	memset(lock, 0, sizeof(pthread_rwlock_t));
 
 	return 0;
 }
 
 int pthread_rwlock_tryrdlock(pthread_rwlock_t *lock)
 {
+	ULONG ret;
+
 	D(bug("%s(%p)\n", __FUNCTION__, lock));
 
 	if (lock == NULL)
 		return EINVAL;
 
-	if (SemaphoreIsInvalid(&lock->exclusive.semaphore))
+	// initialize static rwlocks
+	if (SemaphoreIsInvalid(&lock->semaphore))
 		pthread_rwlock_init(lock, NULL);
 
-	if (pthread_mutex_trylock(&lock->exclusive) != 0)
-		return EBUSY;
+	ret = AttemptSemaphoreShared(&lock->semaphore);
 
-	if (lock->shared_count++ == /*INT_MAX*/ (int)0x7FFFFFFF)
-	{
-		pthread_mutex_lock(&lock->shared);
-
-		lock->shared_count -= lock->completed_count;
-		lock->completed_count = 0;
-
-		pthread_mutex_unlock(&lock->shared);
-	}
-
-	return pthread_mutex_unlock(&lock->exclusive);
+	return (ret == TRUE) ? 0 : EBUSY;
 }
 
 int pthread_rwlock_trywrlock(pthread_rwlock_t *lock)
 {
+	ULONG ret;
+
 	D(bug("%s(%p)\n", __FUNCTION__, lock));
 
 	if (lock == NULL)
 		return EINVAL;
 
-	if (SemaphoreIsInvalid(&lock->exclusive.semaphore))
+	// initialize static rwlocks
+	if (SemaphoreIsInvalid(&lock->semaphore))
 		pthread_rwlock_init(lock, NULL);
 
-	if (pthread_mutex_trylock(&lock->exclusive) != 0)
-		return EBUSY;
+	ret = AttemptSemaphore(&lock->semaphore);
 
-	if (pthread_mutex_trylock(&lock->shared) != 0)
-	{
-		pthread_mutex_unlock(&lock->exclusive);
-		return EBUSY;
-	}
-
-	if (lock->exclusive_count != 0)
-	{
-		pthread_mutex_unlock(&lock->shared);
-		pthread_mutex_unlock(&lock->exclusive);
-		return EBUSY;
-	}
-
-	if (lock->completed_count > 0)
-	{
-		lock->shared_count -= lock->completed_count;
-		lock->completed_count = 0;
-	}
-
-	if (lock->shared_count > 0)
-	{
-		pthread_mutex_unlock(&lock->shared);
-		pthread_mutex_unlock(&lock->exclusive);
-		return EBUSY;
-	}
-	else
-	{
-		lock->exclusive_count = 1;
-	}
-
-	return 0;
+	return (ret == TRUE) ? 0 : EBUSY;
 }
 
 int pthread_rwlock_rdlock(pthread_rwlock_t *lock)
@@ -934,100 +878,58 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *lock)
 	if (lock == NULL)
 		return EINVAL;
 
-	if (SemaphoreIsInvalid(&lock->exclusive.semaphore))
+	// initialize static rwlocks
+	if (SemaphoreIsInvalid(&lock->semaphore))
 		pthread_rwlock_init(lock, NULL);
 
-	if (pthread_mutex_lock(&lock->exclusive) != 0)
+	// we might already have a write lock
+	if (SemaphoreIsMine(&lock->semaphore))
 		return EDEADLK;
 
-	if (lock->shared_count++ == /*INT_MAX*/ (int)0x7FFFFFFF)
-	{
-		pthread_mutex_lock(&lock->shared);
+	ObtainSemaphoreShared(&lock->semaphore);
 
-		lock->shared_count -= lock->completed_count;
-		lock->completed_count = 0;
-
-		pthread_mutex_unlock(&lock->shared);
-	}
-
-	return pthread_mutex_unlock(&lock->exclusive);
+	return 0;
 }
 
 int pthread_rwlock_wrlock(pthread_rwlock_t *lock)
 {
-	int result = 0;
-
 	D(bug("%s(%p)\n", __FUNCTION__, lock));
 
 	if (lock == NULL)
 		return EINVAL;
 
-	if (SemaphoreIsInvalid(&lock->exclusive.semaphore))
+	// initialize static rwlocks
+	if (SemaphoreIsInvalid(&lock->semaphore))
 		pthread_rwlock_init(lock, NULL);
 
-	if (pthread_mutex_lock(&lock->exclusive) != 0)
+	if (SemaphoreIsMine(&lock->semaphore))
 		return EDEADLK;
-	pthread_mutex_lock(&lock->shared);
 
-	if (lock->exclusive_count == 0)
-	{
-		if (lock->completed_count > 0)
-		{
-			lock->shared_count -= lock->completed_count;
-			lock->completed_count = 0;
-		}
+	ObtainSemaphore(&lock->semaphore);
 
-		if (lock->shared_count > 0)
-		{
-			lock->completed_count = -lock->shared_count;
-
-			do
-			{
-				result = pthread_cond_wait(&lock->shared_completed, &lock->shared);
-			}
-			while (result == 0 && lock->completed_count < 0);
-
-			if (result == 0)
-				lock->shared_count = 0;
-		}
-	}
-
-	if (result == 0)
-		lock->exclusive_count++;
-
-	return result;
+	return 0;
 }
 
 int pthread_rwlock_unlock(pthread_rwlock_t *lock)
 {
-	int result = 0;
-
 	D(bug("%s(%p)\n", __FUNCTION__, lock));
 
 	if (lock == NULL)
 		return EINVAL;
 
-	if (SemaphoreIsInvalid(&lock->exclusive.semaphore))
-		return 0; // race condition?
+	// initialize static rwlocks
+	if (SemaphoreIsInvalid(&lock->semaphore))
+		pthread_rwlock_init(lock, NULL);
 
-	if (lock->exclusive_count == 0)
-	{
-		pthread_mutex_lock(&lock->shared);
+	//if (!SemaphoreIsMine(&lock->semaphore))
+	// if no one has obtained the semaphore don't unlock the rwlock
+	// this can be a leap of faith because we don't maintain a separate list of readers
+	if (lock->semaphore.ss_NestCount < 1)
+		return EPERM;
 
-		if (lock->completed_count++ == 0)
-			result = pthread_cond_signal(&lock->shared_completed);
+	ReleaseSemaphore(&lock->semaphore);
 
-		pthread_mutex_unlock(&lock->shared);
-	}
-	else
-	{
-		lock->exclusive_count--;
-
-		pthread_mutex_unlock(&lock->shared);
-		pthread_mutex_unlock(&lock->exclusive);
-	}
-
-	return result;
+	return 0;
 }
 
 //

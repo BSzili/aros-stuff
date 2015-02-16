@@ -208,17 +208,12 @@ typedef struct pthread_rwlockattr pthread_rwlockattr_t;
 
 struct pthread_rwlock
 {
-	pthread_mutex_t exclusive;
-	pthread_mutex_t shared;
-	pthread_cond_t shared_completed;
-	int exclusive_count;
-	int shared_count;
-	int completed_count;
+	struct SignalSemaphore semaphore;
 };
 
 typedef struct pthread_rwlock pthread_rwlock_t;
 
-#define PTHREAD_RWLOCK_INITIALIZER {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0, 0}
+#define PTHREAD_RWLOCK_INITIALIZER {NULL_SEMAPHORE}
 
 //
 // Spinlocks
