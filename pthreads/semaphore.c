@@ -94,8 +94,8 @@ sem_t *sem_open(const char *name, int oflag, mode_t mode, unsigned int value)
 		// TODO: this string should be duplicated
 		sem->node.ln_Name = (char *)name;
 		AddTail(&semaphores, (struct Node *)sem);
-		ReleaseSemaphore(&sema_sem);
 	}
+	ReleaseSemaphore(&sema_sem);
 
 	return sem;
 }
