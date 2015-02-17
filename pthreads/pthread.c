@@ -436,6 +436,35 @@ int pthread_mutex_lock(pthread_mutex_t *mutex)
 	return 0;
 }
 
+int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *abstime)
+{
+	struct timeval end, now;
+	int result;
+
+	D(bug("%s(%p, %p)\n", __FUNCTION__, mutex, abstime));
+
+	if (mutex == NULL)
+		return EINVAL;
+
+	if (abstime == NULL)
+		return pthread_mutex_lock(mutex); 
+	/*else if (abstime.tv_nsec < 0 || abstime.tv_nsec >= 1000000000)
+		return EINVAL;*/
+
+	TIMESPEC_TO_TIMEVAL(&end, abstime);
+
+	// busy waiting is not very nice, but ObtainSemaphore doesn't support timeouts
+	while ((result = pthread_mutex_trylock(mutex)) == EBUSY)
+	{
+		sched_yield();
+		gettimeofday(&now, NULL);
+		if (timercmp(&end, &now, <))
+			return ETIMEDOUT;
+	}
+
+	return result;
+}
+
 int pthread_mutex_trylock(pthread_mutex_t *mutex)
 {
 	ULONG ret;
