@@ -921,6 +921,33 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *lock)
 	return 0;
 }
 
+int pthread_rwlock_timedrdlock(pthread_rwlock_t *lock, const struct timespec *abstime)
+{
+	struct timeval end, now;
+	int result;
+
+	D(bug("%s(%p, %p)\n", __FUNCTION__, lock, abstime));
+
+	if (lock == NULL)
+		return EINVAL;
+
+	if (abstime == NULL)
+		return pthread_rwlock_rdlock(lock);
+
+	TIMESPEC_TO_TIMEVAL(&end, abstime);
+
+	// busy waiting is not very nice, but ObtainSemaphore doesn't support timeouts
+	while ((result = pthread_rwlock_tryrdlock(lock)) == EBUSY)
+	{
+		sched_yield();
+		gettimeofday(&now, NULL);
+		if (timercmp(&end, &now, <))
+			return ETIMEDOUT;
+	}
+
+	return result;
+}
+
 int pthread_rwlock_wrlock(pthread_rwlock_t *lock)
 {
 	D(bug("%s(%p)\n", __FUNCTION__, lock));
@@ -938,6 +965,33 @@ int pthread_rwlock_wrlock(pthread_rwlock_t *lock)
 	ObtainSemaphore(&lock->semaphore);
 
 	return 0;
+}
+
+int pthread_rwlock_timedwrlock(pthread_rwlock_t *lock, const struct timespec *abstime)
+{
+	struct timeval end, now;
+	int result;
+
+	D(bug("%s(%p, %p)\n", __FUNCTION__, lock, abstime));
+
+	if (lock == NULL)
+		return EINVAL;
+
+	if (abstime == NULL)
+		return pthread_rwlock_wrlock(lock);
+
+	TIMESPEC_TO_TIMEVAL(&end, abstime);
+
+	// busy waiting is not very nice, but ObtainSemaphore doesn't support timeouts
+	while ((result = pthread_rwlock_trywrlock(lock)) == EBUSY)
+	{
+		sched_yield();
+		gettimeofday(&now, NULL);
+		if (timercmp(&end, &now, <))
+			return ETIMEDOUT;
+	}
+
+	return result;
 }
 
 int pthread_rwlock_unlock(pthread_rwlock_t *lock)
