@@ -28,6 +28,9 @@
 #include <proto/timer.h>
 #ifdef __AROS__
 #include <aros/symbolsets.h>
+#define	TIMESPEC_TO_TIMEVAL(tv, ts) {	\
+	(tv)->tv_sec = (ts)->tv_sec;		\
+	(tv)->tv_usec = (ts)->tv_nsec / 1000; }
 #else
 #include <constructor.h>
 #define StackSwapArgs PPCStackSwapArgs
@@ -583,10 +586,8 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 
 		TimerBase = timerio->tr_node.io_Device;
 
-
 		timerio->tr_node.io_Command = TR_ADDREQUEST;
-		timerio->tr_time.tv_secs = abstime->tv_sec;
-		timerio->tr_time.tv_micro = abstime->tv_nsec / 1000;
+		TIMESPEC_TO_TIMEVAL(&timerio->tr_time, abstime);
 		if (!relative)
 		{
 			struct timeval starttime;
@@ -1429,7 +1430,7 @@ int pthread_setname_np(pthread_t thread, const char *name)
 	if (inf == NULL)
 		return ERANGE;
 
-	currentname = inf->task->tc_Node.ln_Name;
+	currentname = GetNodeName(inf->task);
 
 #ifdef USE_MSGPORT
 	if (inf->msgport == NULL)
@@ -1463,7 +1464,7 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len)
 	if (inf == NULL)
 		return ERANGE;
 
-	currentname = inf->task->tc_Node.ln_Name;
+	currentname = GetNodeName(inf->task);
 
 	if (strlen(currentname) + 1 > len)
 		return ERANGE;
