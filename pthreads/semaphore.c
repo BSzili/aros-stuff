@@ -237,10 +237,10 @@ int sem_timedwait(sem_t *sem, const struct timespec *abstime)
 
 	sem->waiters_count--;
 
-	if (result == ETIMEDOUT)
+	if (result != 0)
 	{
 		pthread_mutex_unlock(&sem->lock);
-		errno = ETIMEDOUT;
+		errno = result;
 		return -1;
 	}
 
