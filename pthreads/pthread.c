@@ -138,7 +138,7 @@ static pthread_t GetThreadId(struct Task *task)
 
 	DB2(bug("%s(%p)\n", __FUNCTION__, task));
 
-	ObtainSemaphore(&thread_sem);
+	ObtainSemaphoreShared(&thread_sem);
 
 	// First thread id will be 1 so that it is different than default value of pthread_t
 	for (i = PTHREAD_FIRST_THREAD_ID; i < PTHREAD_THREADS_MAX; i++)
@@ -279,7 +279,7 @@ int pthread_setspecific(pthread_key_t key, const void *value)
 	if (key >= PTHREAD_KEYS_MAX)
 		return EINVAL;
 
-	ObtainSemaphore(&tls_sem);
+	ObtainSemaphoreShared(&tls_sem);
 
 	thread = pthread_self();
 	tls = &tlskeys[key];
@@ -1242,7 +1242,7 @@ static void StarterFunc(void)
 		}
 	}
 
-	ObtainSemaphore(&tls_sem);
+	ObtainSemaphoreShared(&tls_sem);
 
 	for (i = 0; i < PTHREAD_KEYS_MAX; i++)
 	{
