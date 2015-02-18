@@ -327,7 +327,7 @@ int pthread_mutexattr_init(pthread_mutexattr_t *attr)
 	if (attr == NULL)
 		return EINVAL;
 
-	memset(attr, 0, sizeof(pthread_mutexattr_t));
+	attr->kind = PTHREAD_MUTEX_DEFAULT;
 
 	return 0;
 }
@@ -383,7 +383,7 @@ int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr)
 	if (attr)
 		mutex->kind = attr->kind;
 	else
-		mutex->kind = 0;
+		mutex->kind = PTHREAD_MUTEX_DEFAULT;
 	InitSemaphore(&mutex->semaphore);
 	mutex->incond = FALSE;
 
