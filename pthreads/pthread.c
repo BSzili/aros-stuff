@@ -22,7 +22,6 @@
 #include <sys/time.h>
 #endif
 #include <dos/dostags.h>
-#include <clib/alib_protos.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/timer.h>
@@ -545,7 +544,7 @@ int pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr)
 		return EINVAL;
 
 	InitSemaphore(&cond->semaphore);
-	NewList((struct List *)&cond->waiters);
+	NEWLIST((struct List *)&cond->waiters);
 
 	return 0;
 }
@@ -1287,7 +1286,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	else
 		pthread_attr_init(&inf->attr);
 	inf->arg = arg;
-	NewList((struct List *)&inf->cleanup);
+	NEWLIST((struct List *)&inf->cleanup);
 
 	// let's trick CreateNewProc into allocating a larger buffer for the name
 	snprintf(name, sizeof(name), "pthread thread #%d", threadnew);
@@ -1414,7 +1413,7 @@ pthread_t pthread_self(void)
 		}
 		inf = GetThreadInfo(thread);
 		memset(inf, 0, sizeof(ThreadInfo));
-		NewList((struct List *)&inf->cleanup);
+		NEWLIST((struct List *)&inf->cleanup);
 		inf->task = task;
 		ReleaseSemaphore(&thread_sem);
 	}

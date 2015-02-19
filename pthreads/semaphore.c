@@ -19,7 +19,6 @@
 */
 
 #include <proto/exec.h>
-#include <clib/alib_protos.h>
 
 #include <stdlib.h>
 #include <fcntl.h>
@@ -40,7 +39,7 @@ static void _Init_Semaphore(void)
 	DB2(bug("%s()\n", __FUNCTION__));
 
 	InitSemaphore(&sema_sem);
-	NewList(&semaphores);
+	NEWLIST(&semaphores);
 }
 
 sem_t *sem_open(const char *name, int oflag, mode_t mode, unsigned int value)
