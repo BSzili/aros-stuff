@@ -618,7 +618,12 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 		timerio.tr_node.io_Message.mn_Length = sizeof(struct timerequest);
 
 		if (OpenDevice((STRPTR)TIMERNAME, UNIT_MICROHZ, &timerio.tr_node, 0) != 0)
+		{
+			if (timermp.mp_SigBit != SIGB_TIMER_FALLBACK)
+				FreeSignal(timermp.mp_SigBit);
+
 			return EINVAL;
+		}
 
 		timerio.tr_node.io_Command = TR_ADDREQUEST;
 		timerio.tr_node.io_Flags = 0;
