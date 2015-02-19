@@ -45,8 +45,13 @@
 #include "pthread.h"
 #include "debug.h"
 
-#define FALLBACKSIGNAL SIGBREAKB_CTRL_E
-#define PARENTSIGNAL SIGBREAKB_CTRL_F
+#define SIGB_PARENT SIGBREAKB_CTRL_F
+#define SIGF_PARENT (1 << SIGB_PARENT)
+#define SIGB_COND_FALLBACK SIGBREAKB_CTRL_E
+#define SIGF_COND_FALLBACK (1 << SIGB_COND_FALLBACK)
+#define SIGB_TIMER_FALLBACK SIGBREAKB_CTRL_D
+#define SIGF_TIMER_FALLBACK (1 << SIGB_TIMER_FALLBACK)
+
 #define NAMELEN 32
 #define PTHREAD_INVALID_ID ((pthread_t)-1)
 #define PTHREAD_FIRST_THREAD_ID (1)
@@ -630,8 +635,8 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	signal = AllocSignal(-1);
 	if (signal == -1)
 	{
-		signal = FALLBACKSIGNAL;
-		SetSignal(1 << FALLBACKSIGNAL, 0);
+		signal = SIGB_COND_FALLBACK;
+		SetSignal(SIGF_COND_FALLBACK, 0);
 	}
 	waiter.sigmask = 1 << signal;
 	sigs |= waiter.sigmask;
@@ -649,7 +654,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	Remove((struct Node *)&waiter);
 	ReleaseSemaphore(&cond->semaphore);
 
-	if (signal != FALLBACKSIGNAL)
+	if (signal != SIGB_COND_FALLBACK)
 		FreeSignal(signal);
 
 	if (abstime)
@@ -1253,7 +1258,7 @@ static void StarterFunc(void)
 	ReplyMsg(&inf->msg);
 #else
 	inf->finished = TRUE;
-	Signal(inf->parent, PARENTSIGNAL);
+	Signal(inf->parent, SIGF_PARENT);
 #endif
 }
 
@@ -1364,7 +1369,7 @@ int pthread_join(pthread_t thread, void **value_ptr)
 		return ESRCH;
 
 	while (!inf->finished)
-		Wait(PARENTSIGNAL);
+		Wait(SIGF_PARENT);
 #endif
 
 	if (value_ptr)
