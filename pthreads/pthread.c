@@ -273,10 +273,10 @@ int pthread_setspecific(pthread_key_t key, const void *value)
 	if (key >= PTHREAD_KEYS_MAX)
 		return EINVAL;
 
-	ObtainSemaphoreShared(&tls_sem);
-
 	thread = pthread_self();
 	tls = &tlskeys[key];
+
+	ObtainSemaphoreShared(&tls_sem);
 
 	if (tls->used == FALSE)
 	{
