@@ -586,8 +586,8 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	BYTE signal;
 	ULONG sigs = 0;
 	ULONG timermask = 0;
-	struct MsgPort *timermp = NULL;
-	struct timerequest *timerio = NULL;
+	struct MsgPort timermp;
+	struct timerequest timerio;
 
 	DB2(bug("%s(%p, %p, %p)\n", __FUNCTION__, cond, mutex, abstime));
 
@@ -600,35 +600,43 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 
 	if (abstime)
 	{
-		if (!(timermp = CreateMsgPort()))
-			return EINVAL;
-
-		if (!(timerio = (struct timerequest *)CreateIORequest(timermp, sizeof(struct timerequest))))
+		timermp.mp_Node.ln_Type = NT_MSGPORT;
+		timermp.mp_Node.ln_Pri = 0;
+		timermp.mp_Node.ln_Name = NULL;
+		timermp.mp_Flags = PA_SIGNAL;
+		timermp.mp_SigTask = FindTask(NULL);
+		signal = AllocSignal(-1);
+		if (signal == -1)
 		{
-			DeleteMsgPort(timermp);
-			return EINVAL;
+			signal = SIGB_TIMER_FALLBACK;
+			SetSignal(SIGF_TIMER_FALLBACK, 0);
 		}
+		timermp.mp_SigBit = signal;
+		NEWLIST(&timermp.mp_MsgList);
 
-		if (OpenDevice((STRPTR)TIMERNAME, UNIT_MICROHZ, &timerio->tr_node, 0) != 0)
-		{
-			DeleteMsgPort(timermp);
-			DeleteIORequest((struct IORequest *)timerio);
+		timerio.tr_node.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+		timerio.tr_node.io_Message.mn_Node.ln_Pri = 0;
+		timerio.tr_node.io_Message.mn_Node.ln_Name = NULL;
+		timerio.tr_node.io_Message.mn_ReplyPort = &timermp;
+		timerio.tr_node.io_Message.mn_Length = sizeof(struct timerequest);
+
+		if (OpenDevice((STRPTR)TIMERNAME, UNIT_MICROHZ, &timerio.tr_node, 0) != 0)
 			return EINVAL;
-		}
 
-		timerio->tr_node.io_Command = TR_ADDREQUEST;
-		TIMESPEC_TO_TIMEVAL(&timerio->tr_time, abstime);
+		timerio.tr_node.io_Command = TR_ADDREQUEST;
+		timerio.tr_node.io_Flags = 0;
+		TIMESPEC_TO_TIMEVAL(&timerio.tr_time, abstime);
 		if (!relative)
 		{
 			struct timeval starttime;
 
 			// GetSysTime can't be used due to the timezone offset in abstime
 			gettimeofday(&starttime, NULL);
-			timersub(&timerio->tr_time, &starttime, &timerio->tr_time);
+			timersub(&timerio.tr_time, &starttime, &timerio.tr_time);
 		}
-		timermask = 1 << timermp->mp_SigBit;
+		timermask = 1 << timermp.mp_SigBit;
 		sigs |= timermask;
-		SendIO((struct IORequest *)timerio);
+		SendIO((struct IORequest *)&timerio);
 	}
 
 	waiter.task = FindTask(NULL);
@@ -659,14 +667,15 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 
 	if (abstime)
 	{
-		if (!CheckIO((struct IORequest *)timerio))
+		if (!CheckIO((struct IORequest *)&timerio))
 		{
-			AbortIO((struct IORequest *)timerio);
-			WaitIO((struct IORequest *)timerio);
+			AbortIO((struct IORequest *)&timerio);
+			WaitIO((struct IORequest *)&timerio);
 		}
-		CloseDevice((struct IORequest *)timerio);
-		DeleteIORequest((struct IORequest *)timerio);
-		DeleteMsgPort(timermp);
+		CloseDevice((struct IORequest *)&timerio);
+
+		if (timermp.mp_SigBit != SIGB_TIMER_FALLBACK)
+			FreeSignal(timermp.mp_SigBit);
 
 		if (sigs & timermask)
 			return ETIMEDOUT;
