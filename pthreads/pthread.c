@@ -55,7 +55,6 @@
 #define NAMELEN 32
 #define PTHREAD_INVALID_ID ((pthread_t)-1)
 #define PTHREAD_FIRST_THREAD_ID (1)
-//#define USE_MSGPORT
 
 typedef struct
 {
@@ -81,13 +80,8 @@ typedef struct
 {
 	void *(*start)(void *);
 	void *arg;
-#ifdef USE_MSGPORT
-	struct MsgPort *msgport;
-	struct Message msg;
-#else
 	struct Task *parent;
 	int finished;
-#endif
 	struct Task *task;
 	void *ret;
 	jmp_buf jmp;
@@ -1263,12 +1257,8 @@ static void StarterFunc(void)
 	ReleaseSemaphore(&tls_sem);
 
 	Forbid();
-#ifdef USE_MSGPORT
-	ReplyMsg(&inf->msg);
-#else
 	inf->finished = TRUE;
 	Signal(inf->parent, SIGF_PARENT);
-#endif
 }
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)(void *), void *arg)
@@ -1308,20 +1298,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	memset(name + oldlen, ' ', sizeof(name) - oldlen - 1);
 	name[sizeof(name) - 1] = '\0';
 
-#ifdef USE_MSGPORT
-	inf->msgport = CreateMsgPort();
-	if (!inf->msgport)
-	{
-		ReleaseSemaphore(&thread_sem);
-		return EAGAIN;
-	}
-
-	inf->msg.mn_Node.ln_Type = NT_MESSAGE;
-	inf->msg.mn_ReplyPort = inf->msgport;
-	inf->msg.mn_Length = sizeof(inf->msg);
-#else
 	inf->parent = FindTask(NULL);
-#endif
 
 	inf->task = (struct Task *)CreateNewProcTags(NP_Entry, StarterFunc,
 #ifdef __MORPHOS__
@@ -1338,12 +1315,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 
 	if (!inf->task)
 	{
-#ifdef USE_MSGPORT
-		DeleteMsgPort(inf->msgport);
-		inf->msgport = NULL;
-#else
 		inf->parent = NULL;
-#endif
 		return EAGAIN;
 	}
 
@@ -1367,19 +1339,11 @@ int pthread_join(pthread_t thread, void **value_ptr)
 
 	inf = GetThreadInfo(thread);
 
-#ifdef USE_MSGPORT
-	if (inf == NULL || inf->msgport == NULL)
-		return ESRCH;
-
-	WaitPort(inf->msgport);
-	DeleteMsgPort(inf->msgport);
-#else
 	if (inf == NULL || inf->parent == NULL)
 		return ESRCH;
 
 	while (!inf->finished)
 		Wait(SIGF_PARENT);
-#endif
 
 	if (value_ptr)
 		*value_ptr = inf->ret;
@@ -1525,11 +1489,7 @@ int pthread_setname_np(pthread_t thread, const char *name)
 
 	currentname = GetNodeName(inf->task);
 
-#ifdef USE_MSGPORT
-	if (inf->msgport == NULL)
-#else
 	if (inf->parent == NULL)
-#endif
 		namelen = strlen(currentname) + 1;
 	else
 		namelen = NAMELEN;
