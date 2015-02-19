@@ -218,7 +218,7 @@ int pthread_key_create(pthread_key_t *key, void (*destructor)(void *))
 			break;
 	}
 
-	if (i >= PTHREAD_KEYS_MAX)
+	if (i == PTHREAD_KEYS_MAX)
 	{
 		ReleaseSemaphore(&tls_sem);
 		return EAGAIN;
