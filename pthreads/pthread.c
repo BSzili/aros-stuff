@@ -584,7 +584,6 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	ULONG timermask = 0;
 	struct MsgPort *timermp = NULL;
 	struct timerequest *timerio = NULL;
-	struct Device *TimerBase = NULL;
 
 	DB2(bug("%s(%p, %p, %p)\n", __FUNCTION__, cond, mutex, abstime));
 
@@ -613,8 +612,6 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 			return EINVAL;
 		}
 
-		TimerBase = timerio->tr_node.io_Device;
-
 		timerio->tr_node.io_Command = TR_ADDREQUEST;
 		TIMESPEC_TO_TIMEVAL(&timerio->tr_time, abstime);
 		if (!relative)
@@ -623,7 +620,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 
 			// GetSysTime can't be used due to the timezone offset in abstime
 			gettimeofday(&starttime, NULL);
-			SubTime(&timerio->tr_time, &starttime);
+			timersub(&timerio->tr_time, &starttime, &timerio->tr_time);
 		}
 		timermask = 1 << timermp->mp_SigBit;
 		sigs |= timermask;
@@ -656,7 +653,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	if (signal != FALLBACKSIGNAL)
 		FreeSignal(signal);
 
-	if (TimerBase)
+	if (abstime)
 	{
 		if (!CheckIO((struct IORequest *)timerio))
 		{
