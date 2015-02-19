@@ -582,6 +582,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	ULONG timermask = 0;
 	struct MsgPort timermp;
 	struct timerequest timerio;
+	struct Task *task;
 
 	DB2(bug("%s(%p, %p, %p)\n", __FUNCTION__, cond, mutex, abstime));
 
@@ -592,13 +593,15 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	if (SemaphoreIsInvalid(&cond->semaphore))
 		pthread_cond_init(cond, NULL);
 
+	task = FindTask(NULL);
+
 	if (abstime)
 	{
 		timermp.mp_Node.ln_Type = NT_MSGPORT;
 		timermp.mp_Node.ln_Pri = 0;
 		timermp.mp_Node.ln_Name = NULL;
 		timermp.mp_Flags = PA_SIGNAL;
-		timermp.mp_SigTask = FindTask(NULL);
+		timermp.mp_SigTask = task;
 		signal = AllocSignal(-1);
 		if (signal == -1)
 		{
@@ -633,7 +636,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 		SendIO((struct IORequest *)&timerio);
 	}
 
-	waiter.task = FindTask(NULL);
+	waiter.task = task;
 	signal = AllocSignal(-1);
 	if (signal == -1)
 	{
