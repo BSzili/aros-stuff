@@ -53,7 +53,6 @@
 #define SIGF_TIMER_FALLBACK (1 << SIGB_TIMER_FALLBACK)
 
 #define NAMELEN 32
-#define PTHREAD_INVALID_ID ((pthread_t)-1)
 #define PTHREAD_FIRST_THREAD_ID (1)
 
 typedef struct
@@ -146,9 +145,6 @@ static pthread_t GetThreadId(struct Task *task)
 	}
 
 	ReleaseSemaphore(&thread_sem);
-
-	if (i >= PTHREAD_THREADS_MAX)
-		i = PTHREAD_INVALID_ID;
 
 	return i;
 }
@@ -1284,7 +1280,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	ObtainSemaphore(&thread_sem);
 
 	threadnew = GetThreadId(NULL);
-	if (threadnew == PTHREAD_INVALID_ID)
+	if (threadnew == PTHREAD_THREADS_MAX)
 	{
 		ReleaseSemaphore(&thread_sem);
 		return EAGAIN;
@@ -1381,13 +1377,13 @@ pthread_t pthread_self(void)
 	thread = GetThreadId(task);
 
 	// add non-pthread processes to our list, so we can handle the main thread
-	if (thread == PTHREAD_INVALID_ID)
+	if (thread == PTHREAD_THREADS_MAX)
 	{
 		ThreadInfo *inf;
 
 		ObtainSemaphore(&thread_sem);
 		thread = GetThreadId(NULL);
-		if (thread == PTHREAD_INVALID_ID)
+		if (thread == PTHREAD_THREADS_MAX)
 		{
 			// TODO: pthread_self is supposed to always succeed, but we can fail
 			// here if we run out of thread slots
