@@ -102,14 +102,14 @@ typedef struct pthread_attr pthread_attr_t;
 
 struct pthread_once
 {
-	volatile int done;		// Indicates if user function executed
-	int started;			// First thread to increment this value 
-							// to zero executes the user function
+	volatile int done;
+	int started;
+	int lock;
 };
 
 typedef struct pthread_once pthread_once_t;
 
-#define PTHREAD_ONCE_INIT       {0, -1}
+#define PTHREAD_ONCE_INIT       {0, -1, 0}
 
 //
 // Mutex

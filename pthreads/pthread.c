@@ -1466,11 +1466,13 @@ int pthread_once(pthread_once_t *once_control, void (*init_routine)(void))
 
 	if (__sync_val_compare_and_swap(&once_control->started, FALSE, TRUE))
 	{
+		pthread_spin_lock(&once_control->lock);
 		if (!once_control->done)
 		{
 			(*init_routine)();
 			once_control->done = TRUE;
 		}
+		pthread_spin_unlock(&once_control->lock);
 	}
 
 	return 0;
