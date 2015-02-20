@@ -491,7 +491,7 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex)
 	if (SemaphoreIsInvalid(&mutex->semaphore))
 		pthread_mutex_init(mutex, NULL);
 
-	if (mutex->kind == PTHREAD_MUTEX_ERRORCHECK && !SemaphoreIsMine(&mutex->semaphore))
+	if (mutex->kind != PTHREAD_MUTEX_NORMAL && !SemaphoreIsMine(&mutex->semaphore))
 		return EPERM;
 
 	ReleaseSemaphore(&mutex->semaphore);
