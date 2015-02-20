@@ -1241,7 +1241,8 @@ int pthread_attr_setschedparam(pthread_attr_t *attr, const struct sched_param *p
 static void StarterFunc(void)
 {
 	ThreadInfo *inf;
-	int i;
+	int i, j;
+	int foundkey = TRUE;
 
 	DB2(bug("%s()\n", __FUNCTION__));
 
@@ -1275,11 +1276,21 @@ static void StarterFunc(void)
 	}
 
 	// destroy all non-NULL TLS key values
+	// since the destructors can set the keys themselves, we have to do multiple iterations
 	ObtainSemaphoreShared(&tls_sem);
-	for (i = 0; i < PTHREAD_KEYS_MAX; i++)
+	for (j = 0; foundkey && j < PTHREAD_DESTRUCTOR_ITERATIONS; j++)
 	{
-		if (tlskeys[i].used && tlskeys[i].destructor && inf->tlsvalues[i])
-			tlskeys[i].destructor(inf->tlsvalues[i]);
+		foundkey = FALSE;
+		for (i = 0; i < PTHREAD_KEYS_MAX; i++)
+		{
+			if (tlskeys[i].used && tlskeys[i].destructor && inf->tlsvalues[i])
+			{
+				void *oldvalue = inf->tlsvalues[i];
+				inf->tlsvalues[i] = NULL;
+				tlskeys[i].destructor(oldvalue);
+				foundkey = TRUE;
+			}
+		}
 	}
 	ReleaseSemaphore(&tls_sem);
 

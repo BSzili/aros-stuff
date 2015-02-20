@@ -50,6 +50,7 @@
 #define PTHREAD_KEYS_MAX                      64
 #define PTHREAD_STACK_MIN                     40960
 #define PTHREAD_THREADS_MAX                   2019
+#define PTHREAD_DESTRUCTOR_ITERATIONS         4
 
 //
 // POSIX pthread types
