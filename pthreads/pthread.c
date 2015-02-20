@@ -593,6 +593,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 
 	if (abstime)
 	{
+		// prepare MsgPort
 		timermp.mp_Node.ln_Type = NT_MSGPORT;
 		timermp.mp_Node.ln_Pri = 0;
 		timermp.mp_Node.ln_Name = NULL;
@@ -607,12 +608,14 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 		timermp.mp_SigBit = signal;
 		NEWLIST(&timermp.mp_MsgList);
 
+		// prepare IORequest
 		timerio.tr_node.io_Message.mn_Node.ln_Type = NT_MESSAGE;
 		timerio.tr_node.io_Message.mn_Node.ln_Pri = 0;
 		timerio.tr_node.io_Message.mn_Node.ln_Name = NULL;
 		timerio.tr_node.io_Message.mn_ReplyPort = &timermp;
 		timerio.tr_node.io_Message.mn_Length = sizeof(struct timerequest);
 
+		// open timer.device
 		if (OpenDevice((STRPTR)TIMERNAME, UNIT_MICROHZ, &timerio.tr_node, 0) != 0)
 		{
 			if (timermp.mp_SigBit != SIGB_TIMER_FALLBACK)
@@ -621,13 +624,14 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 			return EINVAL;
 		}
 
+		// prepare the device command and send it
 		timerio.tr_node.io_Command = TR_ADDREQUEST;
 		timerio.tr_node.io_Flags = 0;
 		TIMESPEC_TO_TIMEVAL(&timerio.tr_time, abstime);
 		if (!relative)
 		{
 			struct timeval starttime;
-
+			// absolute time has to be converted to relative
 			// GetSysTime can't be used due to the timezone offset in abstime
 			gettimeofday(&starttime, NULL);
 			timersub(&timerio.tr_time, &starttime, &timerio.tr_time);
@@ -637,6 +641,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 		SendIO((struct IORequest *)&timerio);
 	}
 
+	// prepare a waiter node
 	waiter.task = task;
 	signal = AllocSignal(-1);
 	if (signal == -1)
@@ -646,16 +651,20 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	}
 	waiter.sigmask = 1 << signal;
 	sigs |= waiter.sigmask;
+
+	// add it to the end of the list
 	ObtainSemaphore(&cond->semaphore);
 	AddTail((struct List *)&cond->waiters, (struct Node *)&waiter);
 	ReleaseSemaphore(&cond->semaphore);
 
+	// wait for the condition to be signalled or the timeout
 	mutex->incond = TRUE;
 	pthread_mutex_unlock(mutex);
 	sigs = Wait(sigs);
 	pthread_mutex_lock(mutex);
 	mutex->incond = FALSE;
 
+	// remove the node from the list
 	ObtainSemaphore(&cond->semaphore);
 	Remove((struct Node *)&waiter);
 	ReleaseSemaphore(&cond->semaphore);
@@ -665,6 +674,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 
 	if (abstime)
 	{
+		// clean up the timerequest
 		if (!CheckIO((struct IORequest *)&timerio))
 		{
 			AbortIO((struct IORequest *)&timerio);
@@ -675,6 +685,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 		if (timermp.mp_SigBit != SIGB_TIMER_FALLBACK)
 			FreeSignal(timermp.mp_SigBit);
 
+		// did we timeout?
 		if (sigs & timermask)
 			return ETIMEDOUT;
 	}
@@ -716,6 +727,7 @@ static int _pthread_cond_broadcast(pthread_cond_t *cond, BOOL onlyfirst)
 	if (SemaphoreIsInvalid(&cond->semaphore))
 		pthread_cond_init(cond, NULL);
 
+	// signal the waiting threads 
 	ObtainSemaphore(&cond->semaphore);
 	ForeachNode(&cond->waiters, waiter)
 	{
@@ -791,10 +803,12 @@ int pthread_barrier_wait(pthread_barrier_t *barrier)
 
 	if (__sync_sub_and_fetch(&barrier->curr_height, 1) == 0)
 	{
+		// last thread to arrive at the barrier, notify others
 		result = pthread_cond_broadcast(&barrier->breeched);
 	}
 	else
 	{
+		// wait for the other threads to arrive at the barrier
 		pthread_mutex_lock(&barrier->lock);
 		result = pthread_cond_wait(&barrier->breeched, &barrier->lock);
 		pthread_mutex_unlock(&barrier->lock);
@@ -802,6 +816,7 @@ int pthread_barrier_wait(pthread_barrier_t *barrier)
 
 	if (__sync_add_and_fetch(&barrier->curr_height, 1) == barrier->init_height)
 	{
+		// are we the last thread to cross the barrier?
 		if (result == 0)
 			result = PTHREAD_BARRIER_SERIAL_THREAD;
 	}
@@ -1230,8 +1245,10 @@ static void StarterFunc(void)
 	// we have to set the priority here to avoid race conditions
 	SetTaskPri(inf->task, inf->attr.param.sched_priority);
 
+	// set a jump point for pthread_exit
 	if (!setjmp(inf->jmp))
 	{
+		// custom stack requires special handling
 		if (inf->attr.stackaddr != NULL && inf->attr.stacksize > 0)
 		{
 			struct StackSwapArgs swapargs;
@@ -1250,16 +1267,16 @@ static void StarterFunc(void)
 		}
 	}
 
+	// destroy all non-NULL TLS key values
 	ObtainSemaphoreShared(&tls_sem);
-
 	for (i = 0; i < PTHREAD_KEYS_MAX; i++)
 	{
 		if (tlskeys[i].used && tlskeys[i].destructor && inf->tlsvalues[i])
 			tlskeys[i].destructor(inf->tlsvalues[i]);
 	}
-
 	ReleaseSemaphore(&tls_sem);
 
+	// tell the parent thread that we are done
 	Forbid();
 	inf->finished = TRUE;
 	Signal(inf->parent, SIGF_PARENT);
@@ -1279,6 +1296,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 
 	ObtainSemaphore(&thread_sem);
 
+	// grab an empty thread slot
 	threadnew = GetThreadId(NULL);
 	if (threadnew == PTHREAD_THREADS_MAX)
 	{
@@ -1286,14 +1304,16 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 		return EAGAIN;
 	}
 
+	// prepare the ThreadInfo structure
 	inf = GetThreadInfo(threadnew);
 	memset(inf, 0, sizeof(ThreadInfo));
 	inf->start = start;
+	inf->arg = arg;
+	inf->parent = FindTask(NULL);
 	if (attr)
 		inf->attr = *attr;
 	else
 		pthread_attr_init(&inf->attr);
-	inf->arg = arg;
 	NEWLIST((struct List *)&inf->cleanup);
 
 	// let's trick CreateNewProc into allocating a larger buffer for the name
@@ -1302,8 +1322,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	memset(name + oldlen, ' ', sizeof(name) - oldlen - 1);
 	name[sizeof(name) - 1] = '\0';
 
-	inf->parent = FindTask(NULL);
-
+	// start the child thread
 	inf->task = (struct Task *)CreateNewProcTags(NP_Entry, StarterFunc,
 #ifdef __MORPHOS__
 		NP_CodeType, CODETYPE_PPC,
@@ -1423,6 +1442,7 @@ void pthread_exit(void *value_ptr)
 	inf = GetThreadInfo(thread);
 	inf->ret = value_ptr;
 
+	// execute the clean-up handlers
 	while ((handler = (CleanupHandler *)RemTail((struct List *)&inf->cleanup)))
 		if (handler->routine)
 			handler->routine(handler->arg);
