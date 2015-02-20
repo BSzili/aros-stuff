@@ -367,21 +367,28 @@ int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int kind)
 // Mutex functions
 //
 
-int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr)
+static int _pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr, BOOL staticinit)
 {
-	D(bug("%s(%p, %p)\n", __FUNCTION__, mutex, attr));
+	DB2(bug("%s(%p, %p)\n", __FUNCTION__, mutex, attr));
 
 	if (mutex == NULL)
 		return EINVAL;
 
 	if (attr)
 		mutex->kind = attr->kind;
-	else
+	else if (!staticinit)
 		mutex->kind = PTHREAD_MUTEX_DEFAULT;
 	InitSemaphore(&mutex->semaphore);
 	mutex->incond = FALSE;
 
 	return 0;
+}
+
+int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr)
+{
+	D(bug("%s(%p, %p)\n", __FUNCTION__, mutex, attr));
+
+	return _pthread_mutex_init(mutex, attr, FALSE);
 }
 
 int pthread_mutex_destroy(pthread_mutex_t *mutex)
@@ -419,7 +426,7 @@ int pthread_mutex_lock(pthread_mutex_t *mutex)
 
 	// initialize static mutexes
 	if (SemaphoreIsInvalid(&mutex->semaphore))
-		pthread_mutex_init(mutex, NULL);
+		_pthread_mutex_init(mutex, NULL, TRUE);
 
 	// normal mutexes would simply deadlock here
 	if (mutex->kind == PTHREAD_MUTEX_ERRORCHECK && SemaphoreIsMine(&mutex->semaphore))
@@ -470,7 +477,7 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
 
 	// initialize static mutexes
 	if (SemaphoreIsInvalid(&mutex->semaphore))
-		pthread_mutex_init(mutex, NULL);
+		_pthread_mutex_init(mutex, NULL, TRUE);
 
 	if (mutex->kind != PTHREAD_MUTEX_RECURSIVE && SemaphoreIsMine(&mutex->semaphore))
 		return EBUSY;
@@ -489,7 +496,7 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex)
 
 	// initialize static mutexes
 	if (SemaphoreIsInvalid(&mutex->semaphore))
-		pthread_mutex_init(mutex, NULL);
+		_pthread_mutex_init(mutex, NULL, TRUE);
 
 	if (mutex->kind != PTHREAD_MUTEX_NORMAL && !SemaphoreIsMine(&mutex->semaphore))
 		return EPERM;
