@@ -190,7 +190,7 @@ typedef struct pthread_barrierattr pthread_barrierattr_t;
 struct pthread_barrier
 {
 	unsigned int curr_height;
-	unsigned int init_height;
+	unsigned int total_height;
 	pthread_cond_t breeched;
 	pthread_mutex_t lock;
 };

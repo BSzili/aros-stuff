@@ -54,6 +54,7 @@
 
 #define NAMELEN 32
 #define PTHREAD_FIRST_THREAD_ID (1)
+#define PTHREAD_BARRIER_FLAG (1UL << 31)
 
 typedef struct
 {
@@ -771,7 +772,8 @@ int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t
 	if (barrier == NULL || count == 0)
 		return EINVAL;
 
-	barrier->curr_height = barrier->init_height = count;
+	barrier->curr_height = count;
+	barrier->total_height = PTHREAD_BARRIER_FLAG;
 	pthread_cond_init(&barrier->breeched, NULL);
 	pthread_mutex_init(&barrier->lock, NULL);
 
@@ -788,47 +790,66 @@ int pthread_barrier_destroy(pthread_barrier_t *barrier)
 	if (pthread_mutex_trylock(&barrier->lock) != 0)
 		return EBUSY;
 
+	if (barrier->total_height > PTHREAD_BARRIER_FLAG)
+	{
+		pthread_mutex_unlock(&barrier->lock);
+		return EBUSY;
+	}
+
 	pthread_mutex_unlock(&barrier->lock);
 
 	if (pthread_cond_destroy(&barrier->breeched) != 0)
 		return EBUSY;
 
 	pthread_mutex_destroy(&barrier->lock);
-	barrier->curr_height = barrier->init_height = 0;
+	barrier->curr_height = barrier->total_height = 0;
 
 	return 0;
 }
 
 int pthread_barrier_wait(pthread_barrier_t *barrier)
 {
-	int result = 0;
-
 	D(bug("%s(%p)\n", __FUNCTION__, barrier));
 
 	if (barrier == NULL)
 		return EINVAL;
 
-	if (__sync_sub_and_fetch(&barrier->curr_height, 1) == 0)
+	pthread_mutex_lock(&barrier->lock);
+
+	// wait until everyone exits the barrier
+	while (barrier->total_height > PTHREAD_BARRIER_FLAG)
+		pthread_cond_wait(&barrier->breeched, &barrier->lock);
+
+	// are we the first to enter?
+	if (barrier->total_height == PTHREAD_BARRIER_FLAG) barrier->total_height = 0;
+
+	barrier->total_height++;
+
+	if (barrier->total_height == barrier->curr_height)
 	{
-		// last thread to arrive at the barrier, notify others
-		result = pthread_cond_broadcast(&barrier->breeched);
+		barrier->total_height += PTHREAD_BARRIER_FLAG - 1;
+		pthread_cond_broadcast(&barrier->breeched);
+
+		pthread_mutex_unlock(&barrier->lock);
+
+		return PTHREAD_BARRIER_SERIAL_THREAD;
 	}
 	else
 	{
-		// wait for the other threads to arrive at the barrier
-		pthread_mutex_lock(&barrier->lock);
-		result = pthread_cond_wait(&barrier->breeched, &barrier->lock);
+		// wait until enough threads enter the barrier
+		while (barrier->total_height < PTHREAD_BARRIER_FLAG)
+			pthread_cond_wait(&barrier->breeched, &barrier->lock);
+
+		barrier->total_height--;
+
+		// get entering threads to wake up
+		if (barrier->total_height == PTHREAD_BARRIER_FLAG)
+			pthread_cond_broadcast(&barrier->breeched);
+
 		pthread_mutex_unlock(&barrier->lock);
-	}
 
-	if (__sync_add_and_fetch(&barrier->curr_height, 1) == barrier->init_height)
-	{
-		// are we the last thread to cross the barrier?
-		if (result == 0)
-			result = PTHREAD_BARRIER_SERIAL_THREAD;
+		return 0;
 	}
-
-	return result;
 }
 
 //
