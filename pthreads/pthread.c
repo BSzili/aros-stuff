@@ -379,7 +379,7 @@ static int _pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t
 	else if (!staticinit)
 		mutex->kind = PTHREAD_MUTEX_DEFAULT;
 	InitSemaphore(&mutex->semaphore);
-	mutex->incond = FALSE;
+	mutex->incond = 0;
 
 	return 0;
 }
@@ -402,14 +402,14 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex)
 	if (SemaphoreIsInvalid(&mutex->semaphore))
 		return 0;
 
-	if (mutex->incond == TRUE || AttemptSemaphore(&mutex->semaphore) == FALSE)
+	if (/*mutex->incond ||*/ AttemptSemaphore(&mutex->semaphore) == FALSE)
 		return EBUSY;
 
-	/*if (mutex->incond == TRUE)
+	if (mutex->incond)
 	{
 		ReleaseSemaphore(&mutex->semaphore);
 		return EBUSY;
-	}*/
+	}
 
 	ReleaseSemaphore(&mutex->semaphore);
 	memset(mutex, 0, sizeof(pthread_mutex_t));
@@ -665,11 +665,11 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	ReleaseSemaphore(&cond->semaphore);
 
 	// wait for the condition to be signalled or the timeout
-	mutex->incond = TRUE;
+	mutex->incond++;
 	pthread_mutex_unlock(mutex);
 	sigs = Wait(sigs);
 	pthread_mutex_lock(mutex);
-	mutex->incond = FALSE;
+	mutex->incond--;
 
 	// remove the node from the list
 	ObtainSemaphore(&cond->semaphore);
