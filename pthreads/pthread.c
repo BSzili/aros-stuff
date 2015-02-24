@@ -88,6 +88,9 @@ typedef struct
 	pthread_attr_t attr;
 	void *tlsvalues[PTHREAD_KEYS_MAX];
 	struct MinList cleanup;
+	int cancelstate;
+	int canceltype;
+	int canceled;
 } ThreadInfo;
 
 static ThreadInfo threads[PTHREAD_THREADS_MAX];
@@ -593,6 +596,8 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	if (cond == NULL || mutex == NULL)
 		return EINVAL;
 
+	pthread_testcancel();
+
 	// initialize static conditions
 	if (SemaphoreIsInvalid(&cond->semaphore))
 		pthread_cond_init(cond, NULL);
@@ -959,6 +964,8 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *lock)
 	if (lock == NULL)
 		return EINVAL;
 
+	pthread_testcancel();
+
 	// initialize static rwlocks
 	if (SemaphoreIsInvalid(&lock->semaphore))
 		pthread_rwlock_init(lock, NULL);
@@ -985,6 +992,8 @@ int pthread_rwlock_timedrdlock(pthread_rwlock_t *lock, const struct timespec *ab
 	if (abstime == NULL)
 		return pthread_rwlock_rdlock(lock);
 
+	pthread_testcancel();
+
 	TIMESPEC_TO_TIMEVAL(&end, abstime);
 
 	// busy waiting is not very nice, but ObtainSemaphore doesn't support timeouts
@@ -1005,6 +1014,8 @@ int pthread_rwlock_wrlock(pthread_rwlock_t *lock)
 
 	if (lock == NULL)
 		return EINVAL;
+
+	pthread_testcancel();
 
 	// initialize static rwlocks
 	if (SemaphoreIsInvalid(&lock->semaphore))
@@ -1030,6 +1041,8 @@ int pthread_rwlock_timedwrlock(pthread_rwlock_t *lock, const struct timespec *ab
 
 	if (abstime == NULL)
 		return pthread_rwlock_wrlock(lock);
+
+	pthread_testcancel();
 
 	TIMESPEC_TO_TIMEVAL(&end, abstime);
 
@@ -1259,11 +1272,42 @@ int pthread_attr_setschedparam(pthread_attr_t *attr, const struct sched_param *p
 // Thread functions
 //
 
+#ifdef __MORPHOS__
+static ULONG CancelHandlerFunc(void);
+static struct EmulLibEntry CancelHandler =
+{
+	TRAP_LIB, 0, (void (*)(void))CancelHandlerFunc
+};
+static ULONG CancelHandlerFunc(void)
+{
+	ULONG signals = (ULONG)REG_D0;
+	APTR data = (APTR)REG_A1;
+	struct ExecBase *SysBase = (struct ExecBase *)REG_A6;
+#else
+AROS_UFH3S(ULONG, CancelHandler,
+	AROS_UFHA(ULONG, signals, D0),
+	AROS_UFHA(APTR, data, A1),
+	AROS_UFHA(struct ExecBase *, SysBase, A6))
+{
+    AROS_USERFUNC_INIT
+#endif
+
+	DB2(bug("%s(%u, %p, %p)\n", __FUNCTION__, signals, data, SysBase));
+
+	pthread_testcancel();
+
+	return signals;
+#ifdef __AROS__
+    AROS_USERFUNC_EXIT
+#endif
+}
+
 static void StarterFunc(void)
 {
 	ThreadInfo *inf;
 	int i, j;
 	int foundkey = TRUE;
+	APTR oldexcept;
 
 	DB2(bug("%s()\n", __FUNCTION__));
 
@@ -1273,6 +1317,15 @@ static void StarterFunc(void)
 
 	// we have to set the priority here to avoid race conditions
 	SetTaskPri(inf->task, inf->attr.param.sched_priority);
+
+	// set the exception handler for async cancellation
+	oldexcept = inf->task->tc_ExceptCode;
+#ifdef __AROS__
+	inf->task->tc_ExceptCode = &AROS_ASMSYMNAME(CancelHandler);
+#else
+	inf->task->tc_ExceptCode = &CancelHandler;
+#endif
+	SetExcept(SIGBREAKF_CTRL_C, SIGBREAKF_CTRL_C);
 
 	// set a jump point for pthread_exit
 	if (!setjmp(inf->jmp))
@@ -1295,6 +1348,10 @@ static void StarterFunc(void)
 			inf->ret = inf->start(inf->arg);
 		}
 	}
+
+	// remove the exception handler
+	SetExcept(0, SIGBREAKF_CTRL_C);
+	inf->task->tc_ExceptCode = oldexcept;
 
 	// destroy all non-NULL TLS key values
 	// since the destructors can set the keys themselves, we have to do multiple iterations
@@ -1354,6 +1411,8 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	else
 		pthread_attr_init(&inf->attr);
 	NEWLIST((struct List *)&inf->cleanup);
+	inf->cancelstate = PTHREAD_CANCEL_ENABLE;
+	inf->canceltype = PTHREAD_CANCEL_DEFERRED;
 
 	// let's trick CreateNewProc into allocating a larger buffer for the name
 	snprintf(name, sizeof(name), "pthread thread #%d", threadnew);
@@ -1403,6 +1462,8 @@ int pthread_join(pthread_t thread, void **value_ptr)
 
 	if (inf == NULL || inf->parent == NULL)
 		return ESRCH;
+
+	pthread_testcancel();
 
 	while (!inf->finished)
 		Wait(SIGF_PARENT);
@@ -1463,10 +1524,87 @@ pthread_t pthread_self(void)
 
 int pthread_cancel(pthread_t thread)
 {
-	D(bug("%s(%u) not implemented\n", __FUNCTION__, thread));
+	ThreadInfo *inf;
 
-	// TODO: should I do a pthread_join here?
-	return ESRCH;
+	D(bug("%s(%u)\n", __FUNCTION__, thread));
+
+	inf = GetThreadInfo(thread);
+
+	if (inf == NULL || inf->parent == NULL || inf->canceled == TRUE)
+		return ESRCH;
+
+	inf->canceled = TRUE;
+
+	// we might have to cancel the thread immediately
+	if (inf->canceltype == PTHREAD_CANCEL_ASYNCHRONOUS && inf->cancelstate == PTHREAD_CANCEL_ENABLE)
+	{
+		struct Task *task;
+
+		task = FindTask(NULL);
+
+		if (inf->task == task)
+			pthread_testcancel(); // cancel ourselves
+		else
+			Signal(inf->task, SIGBREAKF_CTRL_C); // trigger the exception handler 
+	}
+
+	return 0;
+}
+
+int pthread_setcancelstate(int state, int *oldstate)
+{
+	pthread_t thread;
+	ThreadInfo *inf;
+
+	D(bug("%s(%d, %p)\n", __FUNCTION__, state, oldstate));
+
+	if (state != PTHREAD_CANCEL_ENABLE && state != PTHREAD_CANCEL_DISABLE)
+		return EINVAL;
+
+	thread = pthread_self();
+	inf = GetThreadInfo(thread);
+
+	if (oldstate)
+		*oldstate = inf->cancelstate;
+
+	inf->cancelstate = state;
+
+	return 0;
+}
+
+int pthread_setcanceltype(int type, int *oldtype)
+{
+	pthread_t thread;
+	ThreadInfo *inf;
+
+	D(bug("%s(%d, %p)\n", __FUNCTION__, type, oldtype));
+
+	if (type != PTHREAD_CANCEL_DEFERRED && type != PTHREAD_CANCEL_ASYNCHRONOUS)
+		return EINVAL;
+
+	thread = pthread_self();
+	inf = GetThreadInfo(thread);
+
+	if (oldtype)
+		*oldtype = inf->canceltype;
+
+	inf->canceltype = type;
+
+	return 0;
+}
+
+void pthread_testcancel(void)
+{
+	pthread_t thread;
+	ThreadInfo *inf;
+
+	D(bug("%s()\n", __FUNCTION__));
+
+	thread = pthread_self();
+	inf = GetThreadInfo(thread);
+
+	if (inf->canceled && (inf->cancelstate == PTHREAD_CANCEL_ENABLE))
+		pthread_exit(PTHREAD_CANCELED);
 }
 
 void pthread_exit(void *value_ptr)
@@ -1482,10 +1620,10 @@ void pthread_exit(void *value_ptr)
 	inf->ret = value_ptr;
 
 	// execute the clean-up handlers
-	while ((handler = (CleanupHandler *)RemTail((struct List *)&inf->cleanup)))
-		if (handler->routine)
-			handler->routine(handler->arg);
-
+	while ((handler = (CleanupHandler *)RemTail((struct List *)&inf->cleanup))) {
+		if (handler->routine) {
+			handler->routine(handler->arg);}
+	}
 	longjmp(inf->jmp, 1);
 }
 
@@ -1597,8 +1735,6 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len)
 // Cancellation cleanup
 //
 
-// theads can't be cancelled, but they can still call pthread_exit, which
-// will execute these clean-up handlers
 void pthread_cleanup_push(void (*routine)(void *), void *arg)
 {
 	pthread_t thread;

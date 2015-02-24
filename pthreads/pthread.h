@@ -97,6 +97,8 @@ struct pthread_attr
 
 typedef struct pthread_attr pthread_attr_t;
 
+#define PTHREAD_CANCELED              ((void *)-1)
+
 //
 // Once key
 //

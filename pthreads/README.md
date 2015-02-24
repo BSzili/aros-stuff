@@ -4,7 +4,7 @@ This library implements a subset of the POSIX Threads standard on top of the nat
 
 ## Limitations
 
-Due to underlying API limitations thread cancellation and detached threads are not supported. 
+Due to underlying API limitations detached threads are not supported. 
 
 ## License
 
