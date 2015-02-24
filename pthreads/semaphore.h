@@ -31,6 +31,9 @@
 #undef SEM_VALUE_MAX
 #define SEM_VALUE_MAX INT_MAX
 
+#undef SEM_NSEMS_MAX
+#define SEM_NSEMS_MAX 256
+
 #undef SEM_FAILED
 #define SEM_FAILED ((sem_t *)(-1))
 
