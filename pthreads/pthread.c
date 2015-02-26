@@ -1318,6 +1318,7 @@ static void StarterFunc(void)
 	// we have to set the priority here to avoid race conditions
 	SetTaskPri(inf->task, inf->attr.param.sched_priority);
 
+#if 0
 	// set the exception handler for async cancellation
 	oldexcept = inf->task->tc_ExceptCode;
 #ifdef __AROS__
@@ -1326,6 +1327,7 @@ static void StarterFunc(void)
 	inf->task->tc_ExceptCode = &CancelHandler;
 #endif
 	SetExcept(SIGBREAKF_CTRL_C, SIGBREAKF_CTRL_C);
+#endif
 
 	// set a jump point for pthread_exit
 	if (!setjmp(inf->jmp))
@@ -1349,9 +1351,11 @@ static void StarterFunc(void)
 		}
 	}
 
+#if 0
 	// remove the exception handler
 	SetExcept(0, SIGBREAKF_CTRL_C);
 	inf->task->tc_ExceptCode = oldexcept;
+#endif
 
 	// destroy all non-NULL TLS key values
 	// since the destructors can set the keys themselves, we have to do multiple iterations
