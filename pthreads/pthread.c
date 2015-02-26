@@ -56,6 +56,8 @@
 #define PTHREAD_FIRST_THREAD_ID (1)
 #define PTHREAD_BARRIER_FLAG (1UL << 31)
 
+//#define USE_ASYNC_CANCEL
+
 typedef struct
 {
 	struct MinNode node;
@@ -1272,6 +1274,7 @@ int pthread_attr_setschedparam(pthread_attr_t *attr, const struct sched_param *p
 // Thread functions
 //
 
+#ifdef USE_ASYNC_CANCEL
 #ifdef __MORPHOS__
 static ULONG CancelHandlerFunc(void);
 static struct EmulLibEntry CancelHandler =
@@ -1301,13 +1304,16 @@ AROS_UFH3S(ULONG, CancelHandler,
     AROS_USERFUNC_EXIT
 #endif
 }
+#endif
 
 static void StarterFunc(void)
 {
 	ThreadInfo *inf;
 	int i, j;
 	int foundkey = TRUE;
+#ifdef USE_ASYNC_CANCEL
 	APTR oldexcept;
+#endif
 
 	DB2(bug("%s()\n", __FUNCTION__));
 
@@ -1318,7 +1324,7 @@ static void StarterFunc(void)
 	// we have to set the priority here to avoid race conditions
 	SetTaskPri(inf->task, inf->attr.param.sched_priority);
 
-#if 0
+#ifdef USE_ASYNC_CANCEL
 	// set the exception handler for async cancellation
 	oldexcept = inf->task->tc_ExceptCode;
 #ifdef __AROS__
@@ -1351,7 +1357,7 @@ static void StarterFunc(void)
 		}
 	}
 
-#if 0
+#ifdef USE_ASYNC_CANCEL
 	// remove the exception handler
 	SetExcept(0, SIGBREAKF_CTRL_C);
 	inf->task->tc_ExceptCode = oldexcept;
@@ -1803,6 +1809,8 @@ static int _Init_Func(void)
 	//memset(&threads, 0, sizeof(threads));
 	InitSemaphore(&thread_sem);
 	InitSemaphore(&tls_sem);
+	// reserve ID 0 for the main thread
+	pthread_self();
 
 	return TRUE;
 }
