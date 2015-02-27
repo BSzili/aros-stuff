@@ -1822,7 +1822,7 @@ static int _Init_Func(void)
 	InitSemaphore(&thread_sem);
 	InitSemaphore(&tls_sem);
 	// reserve ID 0 for the main thread
-	pthread_self();
+	//pthread_self();
 
 	return TRUE;
 }
