@@ -1442,13 +1442,14 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 		NP_Name, name,
 		TAG_DONE);
 
-	ReleaseSemaphore(&thread_sem);
-
 	if (!inf->task)
 	{
 		inf->parent = NULL;
+		ReleaseSemaphore(&thread_sem);
 		return EAGAIN;
 	}
+
+	ReleaseSemaphore(&thread_sem);
 
 	*thread = threadnew;
 
