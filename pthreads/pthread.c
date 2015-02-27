@@ -1637,6 +1637,16 @@ void pthread_exit(void *value_ptr)
 	longjmp(inf->jmp, 1);
 }
 
+static void OnceCleanup(void *arg)
+{
+	pthread_once_t *once_control;
+
+	DB2(bug("%s(%p)\n", __FUNCTION__, arg));
+
+	once_control = (pthread_once_t *)arg;
+	pthread_spin_unlock(&once_control->lock);
+}
+
 int pthread_once(pthread_once_t *once_control, void (*init_routine)(void))
 {
 	D(bug("%s(%p, %p)\n", __FUNCTION__, once_control, init_routine));
@@ -1649,7 +1659,9 @@ int pthread_once(pthread_once_t *once_control, void (*init_routine)(void))
 		pthread_spin_lock(&once_control->lock);
 		if (!once_control->done)
 		{
+			pthread_cleanup_push(OnceCleanup, once_control);
 			(*init_routine)();
+			pthread_cleanup_pop(0);
 			once_control->done = TRUE;
 		}
 		pthread_spin_unlock(&once_control->lock);
