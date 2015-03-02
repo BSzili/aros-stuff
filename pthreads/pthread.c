@@ -1517,7 +1517,7 @@ pthread_t pthread_self(void)
 		{
 			// TODO: pthread_self is supposed to always succeed, but we can fail
 			// here if we run out of thread slots
-			// this can only happen if too many non-thread processes call
+			// this can only happen if too many non-pthread processes call
 			// this function
 			//ReleaseSemaphore(&thread_sem);
 			//return EAGAIN;
@@ -1631,10 +1631,10 @@ void pthread_exit(void *value_ptr)
 	inf->ret = value_ptr;
 
 	// execute the clean-up handlers
-	while ((handler = (CleanupHandler *)RemTail((struct List *)&inf->cleanup))) {
-		if (handler->routine) {
-			handler->routine(handler->arg);}
-	}
+	while ((handler = (CleanupHandler *)RemTail((struct List *)&inf->cleanup)))
+		if (handler->routine)
+			handler->routine(handler->arg);
+
 	longjmp(inf->jmp, 1);
 }
 
