@@ -141,16 +141,12 @@ static pthread_t GetThreadId(struct Task *task)
 
 	DB2(bug("%s(%p)\n", __FUNCTION__, task));
 
-	ObtainSemaphoreShared(&thread_sem);
-
 	// First thread id will be 1 so that it is different than default value of pthread_t
 	for (i = PTHREAD_FIRST_THREAD_ID; i < PTHREAD_THREADS_MAX; i++)
 	{
 		if (threads[i].task == task)
 			break;
 	}
-
-	ReleaseSemaphore(&thread_sem);
 
 	return i;
 }
@@ -1504,6 +1500,8 @@ pthread_t pthread_self(void)
 	D(bug("%s()\n", __FUNCTION__));
 
 	task = FindTask(NULL);
+
+	ObtainSemaphore(&thread_sem);
 	thread = GetThreadId(task);
 
 	// add non-pthread processes to our list, so we can handle the main thread
@@ -1511,7 +1509,6 @@ pthread_t pthread_self(void)
 	{
 		ThreadInfo *inf;
 
-		ObtainSemaphore(&thread_sem);
 		thread = GetThreadId(NULL);
 		if (thread == PTHREAD_THREADS_MAX)
 		{
@@ -1527,8 +1524,8 @@ pthread_t pthread_self(void)
 		memset(inf, 0, sizeof(ThreadInfo));
 		NEWLIST((struct List *)&inf->cleanup);
 		inf->task = task;
-		ReleaseSemaphore(&thread_sem);
 	}
+	ReleaseSemaphore(&thread_sem);
 
 	return thread;
 }
