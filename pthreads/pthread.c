@@ -180,22 +180,6 @@ static int __m68k_sync_lock_test_and_set(int *v, int n)
 #define __sync_lock_test_and_set(v, n) __m68k_sync_lock_test_and_set(v, n)
 #undef __sync_lock_release
 #define __sync_lock_release(v) __m68k_sync_lock_test_and_set(v, 0)
-
-static int __m68k_sync_add_and_fetch(int *v, int n)
-{
-	int ret;
-
-	Disable();
-	(*v) += (n);
-	ret = (*v);
-	Enable();
-
-	return ret;
-}
-#undef __sync_add_and_fetch
-#define __sync_add_and_fetch(v, n) __m68k_sync_add_and_fetch(v, n)
-#undef __sync_sub_and_fetch
-#define __sync_sub_and_fetch(v, n) __m68k_sync_add_and_fetch(v, -(n))
 #endif
 
 //
