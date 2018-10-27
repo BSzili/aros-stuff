@@ -1,5 +1,6 @@
 /*
   Copyright (C) 2014 Szilard Biro
+  Copyright (C) 2018 Harry Sintonen
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -89,6 +90,9 @@ struct pthread_attr
 {
 	void *stackaddr;
 	size_t stacksize;
+#ifdef __MORPHOS__
+	size_t stacksize68k;
+#endif
 	int detachstate;
 	struct sched_param param;
 	int inheritsched;
