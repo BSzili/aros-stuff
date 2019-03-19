@@ -1,5 +1,6 @@
 /*
   Copyright (C) 2014 Szilard Biro
+  Copyright (C) 2018 Harry Sintonen
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -423,6 +424,66 @@ int pthread_mutex_lock(pthread_mutex_t *mutex)
 	return 0;
 }
 
+#ifdef __MORPHOS__
+static struct timerequest waitutc;
+static inline void UNIXTIME_TO_AMIGATIME(const struct timeval *from, struct timeval *to)
+{
+	const ULONG unix_to_amiga = (8 * 365 + 2) * 24 * 60 * 60;
+
+	if (from->tv_secs >= unix_to_amiga)
+	{
+		to->tv_secs = from->tv_secs - unix_to_amiga;
+		to->tv_micro = from->tv_micro;
+	}
+	else
+	{
+		to->tv_secs = 0;
+		to->tv_micro = 0;
+	}
+}
+static int _obtain_sema_timed(struct SignalSemaphore *sema, const struct timeval *end, int shared)
+{
+	struct MsgPort msgport;
+	struct SemaphoreMessage msg;
+	struct Message *m1, *m2;
+	struct timerequest timerio;
+
+	msgport.mp_SigBit = AllocSignal(-1);
+	if ((BYTE)msgport.mp_SigBit == -1)
+		return EINVAL;
+	msgport.mp_Node.ln_Type = NT_MSGPORT;
+	msgport.mp_Flags = PA_SIGNAL;
+	msgport.mp_SigTask = FindTask(NULL);
+	NEWLIST(&msgport.mp_MsgList);
+	msg.ssm_Message.mn_Node.ln_Type = NT_MESSAGE;
+	msg.ssm_Message.mn_Node.ln_Name = (STRPTR)shared;
+	msg.ssm_Message.mn_ReplyPort = &msgport;
+	timerio.tr_node.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+	timerio.tr_node.io_Device = waitutc.tr_node.io_Device;
+	timerio.tr_node.io_Unit	= waitutc.tr_node.io_Unit;
+	timerio.tr_node.io_Command = TR_ADDREQUEST;
+	timerio.tr_node.io_Message.mn_ReplyPort = &msgport;
+	UNIXTIME_TO_AMIGATIME(end, &timerio.tr_time);
+	Procure(sema, &msg);
+	SendIO((APTR)&timerio);
+
+	WaitPort(&msgport);
+	m1 = GetMsg(&msgport);
+	m2 = GetMsg(&msgport);
+	if (m1 == &timerio.tr_node.io_Message || m2 == &timerio.tr_node.io_Message)
+		Vacate(sema, &msg);
+	else
+	{
+		AbortIO((APTR)&timerio);
+		WaitIO((APTR)&timerio);
+	}
+	FreeSignal(msgport.mp_SigBit);
+	if (msg.ssm_Semaphore == 0)
+		return ETIMEDOUT;
+	return 0;
+}
+#endif
+
 int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *abstime)
 {
 	struct timeval end, now;
@@ -434,12 +495,19 @@ int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *absti
 		return EINVAL;
 
 	if (abstime == NULL)
-		return pthread_mutex_lock(mutex); 
-	/*else if (abstime.tv_nsec < 0 || abstime.tv_nsec >= 1000000000)
-		return EINVAL;*/
+		return pthread_mutex_lock(mutex);
+	else if (abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000)
+		return EINVAL;
 
 	TIMESPEC_TO_TIMEVAL(&end, abstime);
 
+#ifdef __MORPHOS__
+	result = pthread_mutex_trylock(mutex);
+	if (result != EBUSY)
+		return result;
+
+	return _obtain_sema_timed(&mutex->semaphore, &end, 0);
+#else
 	// busy waiting is not very nice, but ObtainSemaphore doesn't support timeouts
 	while ((result = pthread_mutex_trylock(mutex)) == EBUSY)
 	{
@@ -450,6 +518,7 @@ int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *absti
 	}
 
 	return result;
+#endif
 }
 
 int pthread_mutex_trylock(pthread_mutex_t *mutex)
@@ -466,7 +535,7 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
 		_pthread_mutex_init(mutex, NULL, TRUE);
 
 	if (mutex->kind != PTHREAD_MUTEX_RECURSIVE && SemaphoreIsMine(&mutex->semaphore))
-		return EBUSY;
+		return EDEADLK;
 
 	ret = AttemptSemaphore(&mutex->semaphore);
 
@@ -952,9 +1021,12 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *lock)
 	if (SemaphoreIsInvalid(&lock->semaphore))
 		pthread_rwlock_init(lock, NULL);
 
+	// "Results are undefined if the calling thread holds a write lock on rwlock at the time the call is made."
+#ifndef __MORPHOS__
 	// we might already have a write lock
 	if (SemaphoreIsMine(&lock->semaphore))
 		return EDEADLK;
+#endif
 
 	ObtainSemaphoreShared(&lock->semaphore);
 
@@ -973,11 +1045,20 @@ int pthread_rwlock_timedrdlock(pthread_rwlock_t *lock, const struct timespec *ab
 
 	if (abstime == NULL)
 		return pthread_rwlock_rdlock(lock);
+	else if (abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000)
+		return EINVAL;
 
 	pthread_testcancel();
 
 	TIMESPEC_TO_TIMEVAL(&end, abstime);
 
+#ifdef __MORPHOS__
+	result = pthread_rwlock_tryrdlock(lock);
+	if (result != EBUSY)
+		return result;
+
+	return _obtain_sema_timed(&lock->semaphore, &end, 1);
+#else
 	// busy waiting is not very nice, but ObtainSemaphore doesn't support timeouts
 	while ((result = pthread_rwlock_tryrdlock(lock)) == EBUSY)
 	{
@@ -988,6 +1069,7 @@ int pthread_rwlock_timedrdlock(pthread_rwlock_t *lock, const struct timespec *ab
 	}
 
 	return result;
+#endif
 }
 
 int pthread_rwlock_wrlock(pthread_rwlock_t *lock)
@@ -1023,11 +1105,20 @@ int pthread_rwlock_timedwrlock(pthread_rwlock_t *lock, const struct timespec *ab
 
 	if (abstime == NULL)
 		return pthread_rwlock_wrlock(lock);
+	else if (abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000)
+		return EINVAL;
 
 	pthread_testcancel();
 
 	TIMESPEC_TO_TIMEVAL(&end, abstime);
 
+#ifdef __MORPHOS__
+	result = pthread_rwlock_trywrlock(lock);
+	if (result != EBUSY)
+		return result;
+
+	return _obtain_sema_timed(&lock->semaphore, &end, 0);
+#else
 	// busy waiting is not very nice, but ObtainSemaphore doesn't support timeouts
 	while ((result = pthread_rwlock_trywrlock(lock)) == EBUSY)
 	{
@@ -1038,6 +1129,7 @@ int pthread_rwlock_timedwrlock(pthread_rwlock_t *lock, const struct timespec *ab
 	}
 
 	return result;
+#endif
 }
 
 int pthread_rwlock_unlock(pthread_rwlock_t *lock)
@@ -1092,8 +1184,20 @@ int pthread_spin_lock(pthread_spinlock_t *lock)
 	if (lock == NULL)
 		return EINVAL;
 
+#ifdef __MORPHOS__
+	{
+	unsigned int cnt = 0;
+	while (__sync_lock_test_and_set((int *)lock, 1))
+	{
+		asm volatile("" ::: "memory");
+		if ((cnt++ & 255) == 0)
+			sched_yield();
+	}
+	}
+#else
 	while (__sync_lock_test_and_set((int *)lock, 1))
 		sched_yield(); // TODO: don't yield the CPU every iteration
+#endif
 
 	return 0;
 }
@@ -1140,7 +1244,12 @@ int pthread_attr_init(pthread_attr_t *attr)
 	// inherit the priority and stack size of the parent thread
 	task = FindTask(NULL);
 	attr->param.sched_priority = task->tc_Node.ln_Pri;
+#ifdef __MORPHOS__
+	NewGetTaskAttrs(task, &attr->stacksize68k, sizeof(attr->stacksize68k), TASKINFOTYPE_STACKSIZE_M68K, TAG_DONE);
+	NewGetTaskAttrs(task, &attr->stacksize, sizeof(attr->stacksize), TASKINFOTYPE_STACKSIZE, TAG_DONE);
+#else
 	attr->stacksize = (UBYTE *)task->tc_SPUpper - (UBYTE *)task->tc_SPLower;
+#endif
 
 	return 0;
 }
@@ -1322,12 +1431,17 @@ static void StarterFunc(void)
 		if (inf->attr.stackaddr != NULL && inf->attr.stacksize > 0)
 		{
 			struct StackSwapArgs swapargs;
-			struct StackSwapStruct stack; 
+			struct StackSwapStruct stack;
 
 			swapargs.Args[0] = (IPTR)inf->arg;
 			stack.stk_Lower = inf->attr.stackaddr;
+#ifdef __MORPHOS__
+			stack.stk_Upper = (IPTR)stack.stk_Lower + inf->attr.stacksize;
+			stack.stk_Pointer = (APTR)stack.stk_Upper;
+#else
 			stack.stk_Upper = (APTR)((IPTR)stack.stk_Lower + inf->attr.stacksize);
-			stack.stk_Pointer = stack.stk_Upper; 
+			stack.stk_Pointer = stack.stk_Upper;
+#endif
 
 			inf->ret = (void *)NewStackSwap(&stack, inf->start, &swapargs);
 		}
@@ -1415,6 +1529,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 #ifdef __MORPHOS__
 		NP_CodeType, CODETYPE_PPC,
 		(inf->attr.stackaddr == NULL && inf->attr.stacksize > 0) ? NP_PPCStackSize : TAG_IGNORE, inf->attr.stacksize,
+		inf->attr.stacksize68k > 0 ? NP_StackSize : TAG_IGNORE, inf->attr.stacksize68k,
 #else
 		(inf->attr.stackaddr == NULL && inf->attr.stacksize > 0) ? NP_StackSize : TAG_IGNORE, inf->attr.stacksize,
 #endif
@@ -1800,6 +1915,11 @@ static int _Init_Func(void)
 {
 	DB2(bug("%s()\n", __FUNCTION__));
 
+#ifdef __MORPHOS__
+	memset(&waitutc, 0, sizeof(waitutc));
+	if (OpenDevice("timer.device", UNIT_WAITUTC, (APTR) &waitutc, 0) != 0)
+		return FALSE;
+#endif
 	//memset(&threads, 0, sizeof(threads));
 	InitSemaphore(&thread_sem);
 	InitSemaphore(&tls_sem);
@@ -1811,16 +1931,20 @@ static int _Init_Func(void)
 
 static void _Exit_Func(void)
 {
-#if 0
+#ifdef __MORPHOS__
 	pthread_t i;
 #endif
 
 	DB2(bug("%s()\n", __FUNCTION__));
 
 	// wait for the threads?
-#if 0
+#ifdef __MORPHOS__
+	// if we don't do this we can easily end up with unloaded code being executed
 	for (i = 0; i < PTHREAD_THREADS_MAX; i++)
 		pthread_join(i, NULL);
+#endif
+#ifdef __MORPHOS__
+	CloseDevice((APTR) &waitutc);
 #endif
 }
 
@@ -1838,3 +1962,4 @@ static DESTRUCTOR_P(_Exit_Func, 100)
 	_Exit_Func();
 }
 #endif
+
