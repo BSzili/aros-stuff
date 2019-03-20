@@ -620,7 +620,11 @@ int pthread_cond_destroy(pthread_cond_t *cond)
 	if (AttemptSemaphore(&cond->semaphore) == FALSE)
 		return EBUSY;
 
+#ifdef __AROS__
+	if (!IsMinListEmpty(&cond->waiters))
+#else
 	if (!IsListEmpty((struct List *)&cond->waiters))
+#endif
 	{
 		ReleaseSemaphore(&cond->semaphore);
 		return EBUSY;
