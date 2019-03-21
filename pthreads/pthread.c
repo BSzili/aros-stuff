@@ -55,18 +55,13 @@
 #include <stabs.h>
 
 #ifndef IPTR
-#define IPTR ULONG *
+#define IPTR ULONG
 #endif
 
 #   define ForeachNode(l,n) \
 	for (n=(void *)(((struct List *)(l))->lh_Head); \
 	    ((struct Node *)(n))->ln_Succ; \
 	    n=(void *)(((struct Node *)(n))->ln_Succ))
-
-
-extern void Yield();
-#define sched_yield Yield
-
 #endif
 
 
@@ -1617,7 +1612,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	name[sizeof(name) - 1] = '\0';
 
 	// start the child thread
-	inf->task = (struct Task *)CreateNewProcTags(NP_Entry, (ULONG)StarterFunc,
+	inf->task = (struct Task *)CreateNewProcTags(NP_Entry, (IPTR)StarterFunc,
 #ifdef __MORPHOS__
 		NP_CodeType, CODETYPE_PPC,
 		(inf->attr.stackaddr == NULL && inf->attr.stacksize > 0) ? NP_PPCStackSize : TAG_IGNORE, inf->attr.stacksize,
@@ -1626,11 +1621,11 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 		(inf->attr.stackaddr == NULL && inf->attr.stacksize > 0) ? NP_StackSize : TAG_IGNORE, inf->attr.stacksize,
 #endif
 #ifdef __AMIGA__
-		NP_Input, (LONG)inf,
+		NP_Input, (IPTR)inf,
 #else
 		NP_UserData, inf,
 #endif
-        NP_Name, (LONG)name,
+        NP_Name, (IPTR)name,
 		TAG_DONE);
 
     ReleaseSemaphore(&thread_sem);
@@ -1993,12 +1988,10 @@ int pthread_kill(pthread_t thread, int sig)
 // Constructors, destructors
 //
 
-#ifdef __AMIGA__
-#define _Init_Func __pthread_Init_Func
-#else
+#ifndef __AMIGA__
 static
 #endif
-int _Init_Func(void)
+int __pthread_Init_Func(void)
 {
 	DB2(bug("%s()\n", __FUNCTION__));
 
@@ -2023,12 +2016,10 @@ int _Init_Func(void)
 	return TRUE;
 }
 
-#ifdef __AMIGA__
-#define _Exit_Func __pthread_Exit_Func
-#else
+#ifndef __AMIGA__
 static
 #endif
-void _Exit_Func(void)
+void __pthread_Exit_Func(void)
 {
 #if defined(__MORPHOS__) || defined(__AMIGA__)
 	pthread_t i;
@@ -2048,17 +2039,17 @@ void _Exit_Func(void)
 }
 
 #if defined(__MORPHOS__) || defined(__AMIGA__)
-ADD2INIT(_Init_Func, 0);
-ADD2EXIT(_Exit_Func, 0);
+ADD2INIT(__pthread_Init_Func, 0);
+ADD2EXIT(__pthread_Exit_Func, 0);
 #else
-static CONSTRUCTOR_P(_Init_Func, 100)
+static CONSTRUCTOR_P(__pthread_Init_Func, 100)
 {
-	return !_Init_Func();
+	return !__pthread_Init_Func();
 }
 
-static DESTRUCTOR_P(_Exit_Func, 100)
+static DESTRUCTOR_P(__pthread_Exit_Func, 100)
 {
-	_Exit_Func();
+	__pthread_Exit_Func();
 }
 #endif
 
