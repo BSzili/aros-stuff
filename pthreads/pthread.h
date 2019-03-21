@@ -280,6 +280,7 @@ int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
 // Scheduling functions
 //
 
+int pthread_setschedprio(pthread_t thread, int prio);
 int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param *param);
 int pthread_getschedparam(pthread_t thread, int *policy, struct sched_param *param);
 int pthread_setconcurrency(int level);

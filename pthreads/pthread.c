@@ -1775,6 +1775,25 @@ int pthread_once(pthread_once_t *once_control, void (*init_routine)(void))
 // Scheduling functions
 //
 
+int pthread_setschedprio(pthread_t thread, int prio)
+{
+	ThreadInfo *inf;
+
+	D(bug("%s(%u, %d)\n", __FUNCTION__, thread, prio));
+
+	if (prio < sched_get_priority_max(SCHED_NORMAL) || prio > sched_get_priority_min(SCHED_NORMAL))
+		return EINVAL;
+
+	inf = GetThreadInfo(thread);
+
+	if (inf == NULL)
+		return ESRCH;
+
+	SetTaskPri(inf->task, prio);
+
+	return 0;
+}
+
 int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param *param)
 {
 	ThreadInfo *inf;
@@ -1790,6 +1809,26 @@ int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param
 		return ESRCH;
 
 	SetTaskPri(inf->task, param->sched_priority);
+
+	return 0;
+}
+
+int pthread_getschedparam(pthread_t thread, int *policy, struct sched_param *param)
+{
+	ThreadInfo *inf;
+
+	D(bug("%s(%u, %d, %p)\n", __FUNCTION__, thread, policy, param));
+
+	if (param == NULL || policy == NULL)
+		return EINVAL;
+
+	inf = GetThreadInfo(thread);
+
+	if (inf == NULL)
+		return ESRCH;
+
+	param->sched_priority = inf->task->tc_Node.ln_Pri;
+	*policy = SCHED_NORMAL;
 
 	return 0;
 }
