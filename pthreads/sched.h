@@ -23,10 +23,12 @@
 
 #include <time.h>
 
+#ifndef __AMIGA__
 struct sched_param
 {
 	int sched_priority;
 };
+#endif
 
 #define SCHED_NORMAL	0
 #define SCHED_OTHER		0

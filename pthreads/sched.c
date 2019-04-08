@@ -20,6 +20,8 @@
 */
 
 #include <proto/exec.h>
+#include <exec/execbase.h>
+
 
 #include "sched.h"
 #include "debug.h"
@@ -43,10 +45,13 @@ int sched_get_priority_min(int policy)
 
 int sched_yield(void)
 {
-#ifdef __MORPHOS__
+#if defined(__MORPHOS__) || defined(__AMIGA__)
 	D(bug("%s()\n", __FUNCTION__));
 	// calling Permit() will trigger a reschedule
 	Forbid();
+#if defined(__AMIGA__)
+	SysBase->SysFlags |= 1<<15; // trigger rescheduling on Permit();
+#endif
 	Permit();
 #else
 	BYTE oldpri;

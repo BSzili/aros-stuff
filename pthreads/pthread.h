@@ -63,12 +63,21 @@ typedef unsigned int pthread_key_t;
 //
 // POSIX thread attribute values
 //
-
+#ifndef PTHREAD_CREATE_JOINABLE
 #define PTHREAD_CREATE_JOINABLE       0
-#define PTHREAD_CREATE_DETACHED       1
+#endif
 
+#ifndef PTHREAD_CREATE_DETACHED
+#define PTHREAD_CREATE_DETACHED       1
+#endif
+
+#ifndef PTHREAD_INHERIT_SCHED
 #define PTHREAD_INHERIT_SCHED         0
+#endif
+
+#ifndef PTHREAD_EXPLICIT_SCHED
 #define PTHREAD_EXPLICIT_SCHED        1
+#endif
 
 #define PTHREAD_SCOPE_PROCESS         0
 #define PTHREAD_SCOPE_SYSTEM          1
