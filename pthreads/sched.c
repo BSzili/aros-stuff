@@ -49,7 +49,7 @@ int sched_yield(void)
 	D(bug("%s()\n", __FUNCTION__));
 	// calling Permit() will trigger a reschedule
 	Forbid();
-#if defined(__AMIGA__)
+#if !defined(__MORPHOS__)
 	SysBase->SysFlags |= 1<<15; // trigger rescheduling on Permit();
 #endif
 	Permit();
