@@ -1,6 +1,7 @@
 /*
   Copyright (C) 2014 Szilard Biro
   Copyright (C) 2018 Harry Sintonen
+  Copyright (C) 2019 Stefan "Bebbo" Franke - AmigaOS 3 port
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -31,7 +32,7 @@
 #define	TIMESPEC_TO_TIMEVAL(tv, ts) {	\
 	(tv)->tv_sec = (ts)->tv_sec;		\
 	(tv)->tv_usec = (ts)->tv_nsec / 1000; }
-#else
+#elif !defined(__AMIGA__)
 #include <constructor.h>
 #define StackSwapArgs PPCStackSwapArgs
 #define NewStackSwap NewPPCStackSwap
@@ -45,6 +46,24 @@
 
 #include "pthread.h"
 #include "debug.h"
+
+#if defined(__AMIGA__)
+#include <exec/execbase.h>
+#include <inline/alib.h>
+#define NEWLIST(a) NewList(a)
+
+#include <stabs.h>
+
+#ifndef IPTR
+#define IPTR ULONG
+#endif
+
+#   define ForeachNode(l,n) \
+	for (n=(void *)(((struct List *)(l))->lh_Head); \
+	    ((struct Node *)(n))->ln_Succ; \
+	    n=(void *)(((struct Node *)(n))->ln_Succ))
+#endif
+
 
 #define SIGB_PARENT SIGBREAKB_CTRL_F
 #define SIGF_PARENT (1 << SIGB_PARENT)
@@ -118,22 +137,23 @@ static int SemaphoreIsMine(struct SignalSemaphore *sem)
 
 	DB2(bug("%s(%p)\n", __FUNCTION__, sem));
 
+#ifdef __AMIGA__
+    me = SysBase->ThisTask;
+#else
 	me = FindTask(NULL);
-
+#endif
 	return (sem && sem->ss_NestCount > 0 && sem->ss_Owner == me);
 }
 
 static ThreadInfo *GetThreadInfo(pthread_t thread)
 {
-	ThreadInfo *inf = NULL;
-
 	DB2(bug("%s(%u)\n", __FUNCTION__, thread));
 
 	// TODO: more robust error handling?
 	if (thread < PTHREAD_THREADS_MAX)
-		inf = &threads[thread];
+		return &threads[thread];
 
-	return inf;
+	return 0;
 }
 
 static pthread_t GetThreadId(struct Task *task)
@@ -142,8 +162,8 @@ static pthread_t GetThreadId(struct Task *task)
 
 	DB2(bug("%s(%p)\n", __FUNCTION__, task));
 
-	// First thread id will be 1 so that it is different than default value of pthread_t
-	for (i = PTHREAD_FIRST_THREAD_ID; i < PTHREAD_THREADS_MAX; i++)
+	// 0 is main task, First thread id will be 1 so that it is different than default value of pthread_t
+	for (i = 0; i < PTHREAD_THREADS_MAX; i++)
 	{
 		if (threads[i].task == task)
 			break;
@@ -411,25 +431,24 @@ int pthread_mutex_lock(pthread_mutex_t *mutex)
 	if (mutex == NULL)
 		return EINVAL;
 
+    struct SignalSemaphore * sigSem = &mutex->semaphore;
+
 	// initialize static mutexes
-	if (SemaphoreIsInvalid(&mutex->semaphore))
+    if (SemaphoreIsInvalid(sigSem))
 		_pthread_mutex_init(mutex, NULL, TRUE);
 
 	// normal mutexes would simply deadlock here
-	if (mutex->kind == PTHREAD_MUTEX_ERRORCHECK && SemaphoreIsMine(&mutex->semaphore))
+    if (mutex->kind == PTHREAD_MUTEX_ERRORCHECK && SemaphoreIsMine(sigSem))
 		return EDEADLK;
 
-	ObtainSemaphore(&mutex->semaphore);
+    ObtainSemaphore(sigSem);
 
-	return 0;
-}
-
-#ifdef __MORPHOS__
-static struct timerequest waitutc;
-static inline void UNIXTIME_TO_AMIGATIME(const struct timeval *from, struct timeval *to)
-{
-	const ULONG unix_to_amiga = (8 * 365 + 2) * 24 * 60 * 60;
-
+    if (mutex->kind == PTHREAD_MUTEX_NORMAL && sigSem->ss_NestCount > 1) {
+    	// should have blocked - fix this
+    	ReleaseSemaphore(sigSem);
+    	return EDEADLK;
+    }
+#ifndef __AMIGA__
 	if (from->tv_secs >= unix_to_amiga)
 	{
 		to->tv_secs = from->tv_secs - unix_to_amiga;
@@ -440,30 +459,66 @@ static inline void UNIXTIME_TO_AMIGATIME(const struct timeval *from, struct time
 		to->tv_secs = 0;
 		to->tv_micro = 0;
 	}
+#endif
+	return 0;
 }
+#if defined(__MORPHOS__) || defined(__AMIGA__)
 static int _obtain_sema_timed(struct SignalSemaphore *sema, const struct timeval *end, int shared)
 {
 	struct MsgPort msgport;
 	struct SemaphoreMessage msg;
 	struct Message *m1, *m2;
 	struct timerequest timerio;
+	struct Task * task;
+
+#ifdef __AMIGA__
+    task = SysBase->ThisTask;
+#else
+	task = FindTask(NULL);
+#endif
 
 	msgport.mp_SigBit = AllocSignal(-1);
 	if ((BYTE)msgport.mp_SigBit == -1)
 		return EINVAL;
 	msgport.mp_Node.ln_Type = NT_MSGPORT;
 	msgport.mp_Flags = PA_SIGNAL;
-	msgport.mp_SigTask = FindTask(NULL);
+	msgport.mp_SigTask = task;
 	NEWLIST(&msgport.mp_MsgList);
+
+	msg.ssm_Semaphore = 0;
 	msg.ssm_Message.mn_Node.ln_Type = NT_MESSAGE;
-	msg.ssm_Message.mn_Node.ln_Name = (STRPTR)shared;
+	msg.ssm_Message.mn_Node.ln_Name = (char *)shared;
 	msg.ssm_Message.mn_ReplyPort = &msgport;
+
 	timerio.tr_node.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-	timerio.tr_node.io_Device = waitutc.tr_node.io_Device;
-	timerio.tr_node.io_Unit	= waitutc.tr_node.io_Unit;
 	timerio.tr_node.io_Command = TR_ADDREQUEST;
 	timerio.tr_node.io_Message.mn_ReplyPort = &msgport;
+#ifdef __AMIGA__
+	timerio.tr_time = *end;
+	timerio.tr_node.io_Device = DOSBase->dl_TimeReq->tr_node.io_Device;
+	timerio.tr_node.io_Unit	= DOSBase->dl_TimeReq->tr_node.io_Unit;
+
+	// Procure is broken on older systems... hand made...
+	struct SemaphoreRequest sr;
+	sr.sr_Waiter = task;
+
+	SendIO((APTR)&timerio);
+
+	ULONG mask = SIGF_SINGLE | (1<<msgport.mp_SigBit);
+	Forbid();
+	task->tc_SigRecvd &= ~mask;
+	AddTail((struct List *)&sema->ss_WaitQueue, (struct Node *)&sr.sr_Link);
+	ULONG signal = Wait(mask);
+	Permit();
+
+	if (signal & SIGF_SINGLE) {
+		msg.ssm_Semaphore = sema;
+	}
+#else
 	UNIXTIME_TO_AMIGATIME(end, &timerio.tr_time);
+	timerio.tr_node.io_Device = waitutc.tr_node.io_Device;
+	timerio.tr_node.io_Unit	= waitutc.tr_node.io_Unit;
+
 	Procure(sema, &msg);
 	SendIO((APTR)&timerio);
 
@@ -472,6 +527,8 @@ static int _obtain_sema_timed(struct SignalSemaphore *sema, const struct timeval
 	m2 = GetMsg(&msgport);
 	if (m1 == &timerio.tr_node.io_Message || m2 == &timerio.tr_node.io_Message)
 		Vacate(sema, &msg);
+#endif
+
 	else
 	{
 		AbortIO((APTR)&timerio);
@@ -501,7 +558,7 @@ int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *absti
 
 	TIMESPEC_TO_TIMEVAL(&end, abstime);
 
-#ifdef __MORPHOS__
+#if defined(__MORPHOS__) || defined(__AMIGA__)
 	result = pthread_mutex_trylock(mutex);
 	if (result != EBUSY)
 		return result;
@@ -653,7 +710,11 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	if (SemaphoreIsInvalid(&cond->semaphore))
 		pthread_cond_init(cond, NULL);
 
+#ifdef __AMIGA__
+    task = SysBase->ThisTask;
+#else
 	task = FindTask(NULL);
+#endif
 
 	if (abstime)
 	{
@@ -1022,7 +1083,7 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *lock)
 		pthread_rwlock_init(lock, NULL);
 
 	// "Results are undefined if the calling thread holds a write lock on rwlock at the time the call is made."
-#ifndef __MORPHOS__
+#if !defined(__MORPHOS__) && !defined(__AMIGA__)
 	// we might already have a write lock
 	if (SemaphoreIsMine(&lock->semaphore))
 		return EDEADLK;
@@ -1052,7 +1113,7 @@ int pthread_rwlock_timedrdlock(pthread_rwlock_t *lock, const struct timespec *ab
 
 	TIMESPEC_TO_TIMEVAL(&end, abstime);
 
-#ifdef __MORPHOS__
+#if defined(__MORPHOS__) || defined(__AMIGA__)
 	result = pthread_rwlock_tryrdlock(lock);
 	if (result != EBUSY)
 		return result;
@@ -1112,7 +1173,7 @@ int pthread_rwlock_timedwrlock(pthread_rwlock_t *lock, const struct timespec *ab
 
 	TIMESPEC_TO_TIMEVAL(&end, abstime);
 
-#ifdef __MORPHOS__
+#if defined(__MORPHOS__) || defined(__AMIGA__)
 	result = pthread_rwlock_trywrlock(lock);
 	if (result != EBUSY)
 		return result;
@@ -1197,6 +1258,7 @@ int pthread_spin_lock(pthread_spinlock_t *lock)
 #else
 	while (__sync_lock_test_and_set((int *)lock, 1))
 		sched_yield(); // TODO: don't yield the CPU every iteration
+						// SBF: if yield is implemented correctly there's nothing else to do.
 #endif
 
 	return 0;
@@ -1242,7 +1304,11 @@ int pthread_attr_init(pthread_attr_t *attr)
 
 	memset(attr, 0, sizeof(pthread_attr_t));
 	// inherit the priority and stack size of the parent thread
+#ifdef __AMIGA__
+    task = SysBase->ThisTask;
+#else
 	task = FindTask(NULL);
+#endif
 	attr->param.sched_priority = task->tc_Node.ln_Pri;
 #ifdef __MORPHOS__
 	NewGetTaskAttrs(task, &attr->stacksize68k, sizeof(attr->stacksize68k), TASKINFOTYPE_STACKSIZE_M68K, TAG_DONE);
@@ -1406,7 +1472,13 @@ static void StarterFunc(void)
 
 	DB2(bug("%s()\n", __FUNCTION__));
 
+#ifdef __AMIGA__
+    struct Process * proc = (struct Process *)SysBase->ThisTask;
+    inf = (ThreadInfo *)proc->pr_CIS;
+    proc->pr_CIS = 0;
+#else
 	inf = (ThreadInfo *)FindTask(NULL)->tc_UserData;
+#endif
 	// trim the name
 	//inf->task->tc_Node.ln_Name[inf->oldlen];
 
@@ -1430,6 +1502,16 @@ static void StarterFunc(void)
 		// custom stack requires special handling
 		if (inf->attr.stackaddr != NULL && inf->attr.stacksize > 0)
 		{
+#ifdef __AMIGA__
+            struct StackSwapStruct stack;
+            stack.stk_Lower = inf->attr.stackaddr;
+            stack.stk_Upper = (ULONG)((char *)stack.stk_Lower + inf->attr.stacksize);
+            stack.stk_Pointer = (APTR)stack.stk_Upper;
+
+            StackSwap(&stack);
+
+            inf->ret = inf->start(inf->arg);
+#else
 			struct StackSwapArgs swapargs;
 			struct StackSwapStruct stack;
 
@@ -1444,6 +1526,7 @@ static void StarterFunc(void)
 #endif
 
 			inf->ret = (void *)NewStackSwap(&stack, inf->start, &swapargs);
+#endif
 		}
 		else
 		{
@@ -1509,7 +1592,11 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	memset(inf, 0, sizeof(ThreadInfo));
 	inf->start = start;
 	inf->arg = arg;
+#ifdef __AMIGA__
+    inf->parent = SysBase->ThisTask;
+#else
 	inf->parent = FindTask(NULL);
+#endif
 	if (attr)
 		inf->attr = *attr;
 	else
@@ -1525,7 +1612,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	name[sizeof(name) - 1] = '\0';
 
 	// start the child thread
-	inf->task = (struct Task *)CreateNewProcTags(NP_Entry, StarterFunc,
+	inf->task = (struct Task *)CreateNewProcTags(NP_Entry, (IPTR)StarterFunc,
 #ifdef __MORPHOS__
 		NP_CodeType, CODETYPE_PPC,
 		(inf->attr.stackaddr == NULL && inf->attr.stacksize > 0) ? NP_PPCStackSize : TAG_IGNORE, inf->attr.stacksize,
@@ -1533,18 +1620,21 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 #else
 		(inf->attr.stackaddr == NULL && inf->attr.stacksize > 0) ? NP_StackSize : TAG_IGNORE, inf->attr.stacksize,
 #endif
+#ifdef __AMIGA__
+		NP_Input, (IPTR)inf,
+#else
 		NP_UserData, inf,
-		NP_Name, name,
+#endif
+        NP_Name, (IPTR)name,
 		TAG_DONE);
+
+    ReleaseSemaphore(&thread_sem);
 
 	if (!inf->task)
 	{
 		inf->parent = NULL;
-		ReleaseSemaphore(&thread_sem);
 		return EAGAIN;
 	}
-
-	ReleaseSemaphore(&thread_sem);
 
 	*thread = threadnew;
 
@@ -1598,33 +1688,16 @@ pthread_t pthread_self(void)
 
 	D(bug("%s()\n", __FUNCTION__));
 
+#ifdef __AMIGA__
+    task = SysBase->ThisTask;
+#else
 	task = FindTask(NULL);
+#endif
 
-	ObtainSemaphore(&thread_sem);
 	thread = GetThreadId(task);
 
-	// add non-pthread processes to our list, so we can handle the main thread
 	if (thread == PTHREAD_THREADS_MAX)
-	{
-		ThreadInfo *inf;
-
-		thread = GetThreadId(NULL);
-		if (thread == PTHREAD_THREADS_MAX)
-		{
-			// TODO: pthread_self is supposed to always succeed, but we can fail
-			// here if we run out of thread slots
-			// this can only happen if too many non-pthread processes call
-			// this function
-			//ReleaseSemaphore(&thread_sem);
-			//return EAGAIN;
-			abort();
-		}
-		inf = GetThreadInfo(thread);
-		memset(inf, 0, sizeof(ThreadInfo));
-		NEWLIST((struct List *)&inf->cleanup);
-		inf->task = task;
-	}
-	ReleaseSemaphore(&thread_sem);
+		return 0;
 
 	return thread;
 }
@@ -1647,7 +1720,11 @@ int pthread_cancel(pthread_t thread)
 	{
 		struct Task *task;
 
+#ifdef __AMIGA__
+        task = SysBase->ThisTask;
+#else
 		task = FindTask(NULL);
+#endif
 
 		if (inf->task == task)
 			pthread_testcancel(); // cancel ourselves
@@ -1809,7 +1886,7 @@ int pthread_setname_np(pthread_t thread, const char *name)
 	if (inf == NULL)
 		return ERANGE;
 
-	currentname = GetNodeName(inf->task);
+    currentname = inf->task->tc_Node.ln_Name;
 
 	if (inf->parent == NULL)
 		namelen = strlen(currentname) + 1;
@@ -1839,13 +1916,13 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len)
 	if (inf == NULL)
 		return ERANGE;
 
-	currentname = GetNodeName(inf->task);
+    currentname = inf->task->tc_Node.ln_Name;
 
 	if (strlen(currentname) + 1 > len)
 		return ERANGE;
 
-	// TODO: partially copy the name?
-	strncpy(name, currentname, len);
+	// length check passed - strcpy is ok.
+	strcpy(name, currentname);
 
 	return 0;
 }
@@ -1911,7 +1988,10 @@ int pthread_kill(pthread_t thread, int sig)
 // Constructors, destructors
 //
 
-static int _Init_Func(void)
+#ifndef __AMIGA__
+static
+#endif
+int __pthread_Init_Func(void)
 {
 	DB2(bug("%s()\n", __FUNCTION__));
 
@@ -1923,24 +2003,34 @@ static int _Init_Func(void)
 	//memset(&threads, 0, sizeof(threads));
 	InitSemaphore(&thread_sem);
 	InitSemaphore(&tls_sem);
-	// reserve ID 0 for the main thread
-	//pthread_self();
 
+	// reserve ID 0 for the main thread
+	ThreadInfo *inf = &threads[0];
+#ifdef __AMIGA__
+    inf->task = SysBase->ThisTask;
+#else
+    inf->task = FindTask(NULL);
+#endif
+
+	NEWLIST((struct List *)&inf->cleanup);
 	return TRUE;
 }
 
-static void _Exit_Func(void)
+#ifndef __AMIGA__
+static
+#endif
+void __pthread_Exit_Func(void)
 {
-#ifdef __MORPHOS__
+#if defined(__MORPHOS__) || defined(__AMIGA__)
 	pthread_t i;
 #endif
 
 	DB2(bug("%s()\n", __FUNCTION__));
 
 	// wait for the threads?
-#ifdef __MORPHOS__
+#if defined(__MORPHOS__) || defined(__AMIGA__)
 	// if we don't do this we can easily end up with unloaded code being executed
-	for (i = 0; i < PTHREAD_THREADS_MAX; i++)
+	for (i = 1; i < PTHREAD_THREADS_MAX; i++)
 		pthread_join(i, NULL);
 #endif
 #ifdef __MORPHOS__
@@ -1948,18 +2038,18 @@ static void _Exit_Func(void)
 #endif
 }
 
-#ifdef __AROS__
-ADD2INIT(_Init_Func, 0);
-ADD2EXIT(_Exit_Func, 0);
+#if defined(__MORPHOS__) || defined(__AMIGA__)
+ADD2INIT(__pthread_Init_Func, 0);
+ADD2EXIT(__pthread_Exit_Func, 0);
 #else
-static CONSTRUCTOR_P(_Init_Func, 100)
+static CONSTRUCTOR_P(__pthread_Init_Func, 100)
 {
-	return !_Init_Func();
+	return !__pthread_Init_Func();
 }
 
-static DESTRUCTOR_P(_Exit_Func, 100)
+static DESTRUCTOR_P(__pthread_Exit_Func, 100)
 {
-	_Exit_Func();
+	__pthread_Exit_Func();
 }
 #endif
 

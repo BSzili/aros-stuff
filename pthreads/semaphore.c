@@ -28,6 +28,12 @@
 #include "semaphore.h"
 #include "debug.h"
 
+#if defined(__AMIGA__)
+#include <exec/execbase.h>
+#include <inline/alib.h>
+#define NEWLIST(a) NewList(a)
+#endif
+
 #ifndef EOVERFLOW
 #define EOVERFLOW EINVAL
 #endif
@@ -92,7 +98,7 @@ sem_t *sem_open(const char *name, int oflag, mode_t mode, unsigned int value)
 			ReleaseSemaphore(&sema_sem);
 			return SEM_FAILED;
 		}
-		sem->node.ln_Name = (STRPTR) (sem + 1);
+		sem->node.ln_Name = (char *) (sem + 1);
 		strcpy(sem->node.ln_Name, name);
 		AddTail(&semaphores, (struct Node *)sem);
 	}
