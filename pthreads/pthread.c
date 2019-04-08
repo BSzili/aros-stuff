@@ -113,6 +113,7 @@ typedef struct
 	int cancelstate;
 	int canceltype;
 	int canceled;
+	int detached;
 } ThreadInfo;
 
 static ThreadInfo threads[PTHREAD_THREADS_MAX];
@@ -1353,7 +1354,7 @@ int pthread_attr_setdetachstate(pthread_attr_t *attr, int detachstate)
 {
 	D(bug("%s(%p, %d)\n", __FUNCTION__, attr, detachstate));
 
-	if (attr == NULL || detachstate != PTHREAD_CREATE_JOINABLE)
+	if (attr == NULL || (detachstate != PTHREAD_CREATE_JOINABLE && detachstate != PTHREAD_CREATE_DETACHED))
 		return EINVAL;
 
 	attr->detachstate = detachstate;
@@ -1563,10 +1564,20 @@ static void StarterFunc(void)
 	}
 	ReleaseSemaphore(&tls_sem);
 
-	// tell the parent thread that we are done
-	Forbid();
-	inf->finished = TRUE;
-	Signal(inf->parent, SIGF_PARENT);
+	if (!inf->detached)
+	{
+		// tell the parent thread that we are done
+		Forbid();
+		inf->finished = TRUE;
+		Signal(inf->parent, SIGF_PARENT);
+	}
+	else
+	{
+		// no one is waiting for us, do the clean up
+		ObtainSemaphore(&thread_sem);
+		memset(inf, 0, sizeof(ThreadInfo));
+		ReleaseSemaphore(&thread_sem);
+	}
 }
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)(void *), void *arg)
@@ -1608,6 +1619,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	NEWLIST((struct List *)&inf->cleanup);
 	inf->cancelstate = PTHREAD_CANCEL_ENABLE;
 	inf->canceltype = PTHREAD_CANCEL_DEFERRED;
+	inf->detached = inf->attr.detachstate == PTHREAD_CREATE_DETACHED;
 
 	// let's trick CreateNewProc into allocating a larger buffer for the name
 	snprintf(name, sizeof(name), "pthread thread #%d", threadnew);
@@ -1647,9 +1659,21 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 
 int pthread_detach(pthread_t thread)
 {
-	D(bug("%s(%u) not implemented\n", __FUNCTION__, thread));
+	ThreadInfo *inf;
 
-	return ESRCH;
+	D(bug("%s(%u, %p)\n", __FUNCTION__, thread, value_ptr));
+
+	inf = GetThreadInfo(thread);
+
+	if (inf == NULL || inf->task == NULL)
+		return ESRCH;
+
+	if (inf->detached)
+		return EINVAL;
+
+	inf->detached = TRUE;
+
+	return 0;
 }
 
 int pthread_join(pthread_t thread, void **value_ptr)
@@ -1662,6 +1686,9 @@ int pthread_join(pthread_t thread, void **value_ptr)
 
 	if (inf == NULL || inf->parent == NULL)
 		return ESRCH;
+
+	if (inf->detached)
+		return EINVAL;
 
 	pthread_testcancel();
 
@@ -1970,6 +1997,25 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len)
 	return 0;
 }
 
+int pthread_getattr_np(pthread_t thread, pthread_attr_t *attr)
+{
+	ThreadInfo *inf;
+
+	D(bug("%s(%u, %p)\n", __FUNCTION__, thread, attr));
+
+	if (attr == NULL)
+		return EINVAL;
+
+	inf = GetThreadInfo(thread);
+
+	if (inf == NULL)
+		return ESRCH; // TODO
+
+	*attr = inf->attr;
+
+	return 0;
+}
+
 //
 // Cancellation cleanup
 //
@@ -2064,18 +2110,28 @@ static
 #endif
 void __pthread_Exit_Func(void)
 {
-#if defined(__MORPHOS__) || defined(__AMIGA__)
 	pthread_t i;
-#endif
+	ThreadInfo *inf;
 
 	DB2(bug("%s()\n", __FUNCTION__));
 
-	// wait for the threads?
-#if defined(__MORPHOS__) || defined(__AMIGA__)
 	// if we don't do this we can easily end up with unloaded code being executed
 	for (i = 1; i < PTHREAD_THREADS_MAX; i++)
-		pthread_join(i, NULL);
-#endif
+	{
+		inf = &threads[i];
+		if (inf->detached)
+		{
+			D(bug("waiting for detached thread %d\n", i));
+			// TODO longer delay between retries?
+			while (inf->task)
+				Delay(1);
+		}
+		else
+		{
+			pthread_join(i, NULL);
+		}
+	}
+
 #ifdef __MORPHOS__
 	CloseDevice((APTR) &waitutc);
 #endif
