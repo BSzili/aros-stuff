@@ -32,7 +32,7 @@
 #define	TIMESPEC_TO_TIMEVAL(tv, ts) {	\
 	(tv)->tv_sec = (ts)->tv_sec;		\
 	(tv)->tv_usec = (ts)->tv_nsec / 1000; }
-#elif !defined(__AMIGA__)
+#elif !defined(__AMIGA__) || defined(__MORPHOS__)
 #include <constructor.h>
 #define StackSwapArgs PPCStackSwapArgs
 #define NewStackSwap NewPPCStackSwap
@@ -47,7 +47,7 @@
 #include "pthread.h"
 #include "debug.h"
 
-#if defined(__AMIGA__)
+#if defined(__AMIGA__) && !defined(__MORPHOS__)
 #include <exec/execbase.h>
 #include <inline/alib.h>
 #define NEWLIST(a) NewList(a)
@@ -62,6 +62,13 @@
 	for (n=(void *)(((struct List *)(l))->lh_Head); \
 	    ((struct Node *)(n))->ln_Succ; \
 	    n=(void *)(((struct Node *)(n))->ln_Succ))
+
+#define GET_THIS_TASK SysBase->ThisTask;
+
+#else
+
+#define GET_THIS_TASK FindTask(NULL)
+
 #endif
 
 
@@ -138,11 +145,8 @@ static int SemaphoreIsMine(struct SignalSemaphore *sem)
 
 	DB2(bug("%s(%p)\n", __FUNCTION__, sem));
 
-#ifdef __AMIGA__
-    me = SysBase->ThisTask;
-#else
-	me = FindTask(NULL);
-#endif
+	me = GET_THIS_TASK;
+
 	return (sem && sem->ss_NestCount > 0 && sem->ss_Owner == me);
 }
 
@@ -203,6 +207,69 @@ static int __m68k_sync_lock_test_and_set(int *v, int n)
 #undef __sync_lock_release
 #define __sync_lock_release(v) __m68k_sync_lock_test_and_set(v, 0)
 #endif
+
+static BOOL OpenTimerDevice(struct IORequest *io, struct MsgPort *mp, struct Task *task)
+{
+	BYTE signal;
+
+	DB2(bug("%s(%p,%p,%p)\n", __FUNCTION__, io, mp, task));
+
+	// prepare MsgPort
+	mp->mp_Node.ln_Type = NT_MSGPORT;
+	mp->mp_Node.ln_Pri = 0;
+	mp->mp_Node.ln_Name = NULL;
+	mp->mp_Flags = PA_SIGNAL;
+	mp->mp_SigTask = task;
+	signal = AllocSignal(-1);
+	if (signal == -1)
+	{
+		signal = SIGB_TIMER_FALLBACK;
+		SetSignal(SIGF_TIMER_FALLBACK, 0);
+	}
+	mp->mp_SigBit = signal;
+	NEWLIST(&mp->mp_MsgList);
+
+	// prepare IORequest
+	io->io_Message.mn_Node.ln_Type = NT_MESSAGE;
+	io->io_Message.mn_Node.ln_Pri = 0;
+	io->io_Message.mn_Node.ln_Name = NULL;
+	io->io_Message.mn_ReplyPort = mp;
+	io->io_Message.mn_Length = sizeof(struct timerequest);
+
+	// open timer.device
+#if defined(__AMIGA__) && !defined(__MORPHOS__)
+	io->io_Device = DOSBase->dl_TimeReq->tr_node.io_Device;
+	io->io_Unit = DOSBase->dl_TimeReq->tr_node.io_Unit;
+	io->io_Error = 0;
+	return TRUE;
+#else
+	return !OpenDevice((STRPTR)TIMERNAME, UNIT_MICROHZ, io, 0);
+#endif
+}
+
+static void CloseTimerDevice(struct IORequest *io)
+{
+	struct MsgPort *mp;
+
+	DB2(bug("%s(%p)\n", __FUNCTION__, io));
+
+	if (!CheckIO(io))
+	{
+		AbortIO(io);
+		WaitIO(io);
+	}
+
+#if defined(__AMIGA__) && !defined(__MORPHOS__)
+	io->io_Device = (struct Device *)-1;
+#else
+	if (io->io_Device != NULL)
+		CloseDevice(io);
+#endif
+
+	mp = io->io_Message.mn_ReplyPort;
+	if (mp->mp_SigBit != SIGB_TIMER_FALLBACK)
+		FreeSignal(mp->mp_SigBit);
+}
 
 //
 // Thread specific data functions
@@ -432,39 +499,28 @@ int pthread_mutex_lock(pthread_mutex_t *mutex)
 	if (mutex == NULL)
 		return EINVAL;
 
-    struct SignalSemaphore * sigSem = &mutex->semaphore;
+	struct SignalSemaphore * sigSem = &mutex->semaphore;
 
 	// initialize static mutexes
-    if (SemaphoreIsInvalid(sigSem))
+	if (SemaphoreIsInvalid(sigSem))
 		_pthread_mutex_init(mutex, NULL, TRUE);
 
 	// normal mutexes would simply deadlock here
-    if (mutex->kind == PTHREAD_MUTEX_ERRORCHECK && SemaphoreIsMine(sigSem))
+	if (mutex->kind == PTHREAD_MUTEX_ERRORCHECK && SemaphoreIsMine(sigSem))
 		return EDEADLK;
 
-    ObtainSemaphore(sigSem);
+	ObtainSemaphore(sigSem);
 
-    if (mutex->kind == PTHREAD_MUTEX_NORMAL && sigSem->ss_NestCount > 1) {
-    	// should have blocked - fix this
-    	ReleaseSemaphore(sigSem);
-    	return EDEADLK;
-    }
-#ifndef __AMIGA__
-	if (from->tv_secs >= unix_to_amiga)
-	{
-		to->tv_secs = from->tv_secs - unix_to_amiga;
-		to->tv_micro = from->tv_micro;
+	if (mutex->kind == PTHREAD_MUTEX_NORMAL && sigSem->ss_NestCount > 1) {
+		// should have blocked - fix this
+		ReleaseSemaphore(sigSem);
+		return EDEADLK;
 	}
-	else
-	{
-		to->tv_secs = 0;
-		to->tv_micro = 0;
-	}
-#endif
+
 	return 0;
 }
-#if defined(__MORPHOS__) || defined(__AMIGA__)
-static int _obtain_sema_timed(struct SignalSemaphore *sema, const struct timeval *end, int shared)
+
+static int _obtain_sema_timed(struct SignalSemaphore *sema, const struct timespec *abstime, int shared)
 {
 	struct MsgPort msgport;
 	struct SemaphoreMessage msg;
@@ -472,38 +528,39 @@ static int _obtain_sema_timed(struct SignalSemaphore *sema, const struct timeval
 	struct timerequest timerio;
 	struct Task * task;
 
-#ifdef __AMIGA__
-    task = SysBase->ThisTask;
-#else
-	task = FindTask(NULL);
-#endif
+	DB2(bug("%s(%p, %p, %d)\n", __FUNCTION__, sema, abstime, shared));
 
-	msgport.mp_SigBit = AllocSignal(-1);
-	if ((BYTE)msgport.mp_SigBit == -1)
+	task = GET_THIS_TASK;
+
+	if (!OpenTimerDevice((struct IORequest *)&timerio, &msgport, task))
+	{
+		CloseTimerDevice((struct IORequest *)&timerio);
 		return EINVAL;
-	msgport.mp_Node.ln_Type = NT_MSGPORT;
-	msgport.mp_Flags = PA_SIGNAL;
-	msgport.mp_SigTask = task;
-	NEWLIST(&msgport.mp_MsgList);
+	}
 
-	msg.ssm_Semaphore = 0;
-	msg.ssm_Message.mn_Node.ln_Type = NT_MESSAGE;
-	msg.ssm_Message.mn_Node.ln_Name = (char *)shared;
-	msg.ssm_Message.mn_ReplyPort = &msgport;
-
-	timerio.tr_node.io_Message.mn_Node.ln_Type = NT_MESSAGE;
 	timerio.tr_node.io_Command = TR_ADDREQUEST;
-	timerio.tr_node.io_Message.mn_ReplyPort = &msgport;
-#ifdef __AMIGA__
-	timerio.tr_time = *end;
-	timerio.tr_node.io_Device = DOSBase->dl_TimeReq->tr_node.io_Device;
-	timerio.tr_node.io_Unit	= DOSBase->dl_TimeReq->tr_node.io_Unit;
+	timerio.tr_node.io_Flags = 0;
+	TIMESPEC_TO_TIMEVAL(&timerio.tr_time, abstime);
+	//if (!relative)
+	{
+		struct timeval starttime;
+		// absolute time has to be converted to relative
+		// GetSysTime can't be used due to the timezone offset in abstime
+		gettimeofday(&starttime, NULL);
+		timersub(&timerio.tr_time, &starttime, &timerio.tr_time);
+		if (!timerisset(&timerio.tr_time))
+		{
+			CloseTimerDevice((struct IORequest *)&timerio);
+			return ETIMEDOUT;
+		}
+	}
 
+#if defined(__AMIGA__) && !defined(__MORPHOS__)
 	// Procure is broken on older systems... hand made...
 	struct SemaphoreRequest sr;
 	sr.sr_Waiter = task;
 
-	SendIO((APTR)&timerio);
+	SendIO((struct IORequest *)&timerio);
 
 	ULONG mask = SIGF_SINGLE | (1<<msgport.mp_SigBit);
 	Forbid();
@@ -512,16 +569,17 @@ static int _obtain_sema_timed(struct SignalSemaphore *sema, const struct timeval
 	ULONG signal = Wait(mask);
 	Permit();
 
-	if (signal & SIGF_SINGLE) {
+	if (signal & SIGF_SINGLE)
 		msg.ssm_Semaphore = sema;
-	}
+	else
+		msg.ssm_Semaphore = 0;
 #else
-	UNIXTIME_TO_AMIGATIME(end, &timerio.tr_time);
-	timerio.tr_node.io_Device = waitutc.tr_node.io_Device;
-	timerio.tr_node.io_Unit	= waitutc.tr_node.io_Unit;
+	msg.ssm_Message.mn_Node.ln_Type = NT_MESSAGE;
+	msg.ssm_Message.mn_Node.ln_Name = (char *)shared;
+	msg.ssm_Message.mn_ReplyPort = &msgport;
 
 	Procure(sema, &msg);
-	SendIO((APTR)&timerio);
+	SendIO((struct IORequest *)&timerio);
 
 	WaitPort(&msgport);
 	m1 = GetMsg(&msgport);
@@ -530,21 +588,16 @@ static int _obtain_sema_timed(struct SignalSemaphore *sema, const struct timeval
 		Vacate(sema, &msg);
 #endif
 
-	else
-	{
-		AbortIO((APTR)&timerio);
-		WaitIO((APTR)&timerio);
-	}
-	FreeSignal(msgport.mp_SigBit);
+	CloseTimerDevice((struct IORequest *)&timerio);
+
 	if (msg.ssm_Semaphore == 0)
 		return ETIMEDOUT;
+
 	return 0;
 }
-#endif
 
 int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *abstime)
 {
-	struct timeval end, now;
 	int result;
 
 	D(bug("%s(%p, %p)\n", __FUNCTION__, mutex, abstime));
@@ -557,26 +610,11 @@ int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *absti
 	else if (abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000)
 		return EINVAL;
 
-	TIMESPEC_TO_TIMEVAL(&end, abstime);
-
-#if defined(__MORPHOS__) || defined(__AMIGA__)
 	result = pthread_mutex_trylock(mutex);
 	if (result != EBUSY)
 		return result;
 
-	return _obtain_sema_timed(&mutex->semaphore, &end, 0);
-#else
-	// busy waiting is not very nice, but ObtainSemaphore doesn't support timeouts
-	while ((result = pthread_mutex_trylock(mutex)) == EBUSY)
-	{
-		sched_yield();
-		gettimeofday(&now, NULL);
-		if (timercmp(&end, &now, <))
-			return ETIMEDOUT;
-	}
-
-	return result;
-#endif
+	return _obtain_sema_timed(&mutex->semaphore, abstime, SM_EXCLUSIVE);
 }
 
 int pthread_mutex_trylock(pthread_mutex_t *mutex)
@@ -704,7 +742,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	struct timerequest timerio;
 	struct Task *task;
 
-	DB2(bug("%s(%p, %p, %p)\n", __FUNCTION__, cond, mutex, abstime));
+	DB2(bug("%s(%p, %p, %p, %d)\n", __FUNCTION__, cond, mutex, abstime, relative));
 
 	if (cond == NULL || mutex == NULL)
 		return EINVAL;
@@ -715,42 +753,14 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	if (SemaphoreIsInvalid(&cond->semaphore))
 		pthread_cond_init(cond, NULL);
 
-#ifdef __AMIGA__
-    task = SysBase->ThisTask;
-#else
-	task = FindTask(NULL);
-#endif
+	task = GET_THIS_TASK;
 
 	if (abstime)
 	{
-		// prepare MsgPort
-		timermp.mp_Node.ln_Type = NT_MSGPORT;
-		timermp.mp_Node.ln_Pri = 0;
-		timermp.mp_Node.ln_Name = NULL;
-		timermp.mp_Flags = PA_SIGNAL;
-		timermp.mp_SigTask = task;
-		signal = AllocSignal(-1);
-		if (signal == -1)
-		{
-			signal = SIGB_TIMER_FALLBACK;
-			SetSignal(SIGF_TIMER_FALLBACK, 0);
-		}
-		timermp.mp_SigBit = signal;
-		NEWLIST(&timermp.mp_MsgList);
-
-		// prepare IORequest
-		timerio.tr_node.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-		timerio.tr_node.io_Message.mn_Node.ln_Pri = 0;
-		timerio.tr_node.io_Message.mn_Node.ln_Name = NULL;
-		timerio.tr_node.io_Message.mn_ReplyPort = &timermp;
-		timerio.tr_node.io_Message.mn_Length = sizeof(struct timerequest);
-
 		// open timer.device
-		if (OpenDevice((STRPTR)TIMERNAME, UNIT_MICROHZ, &timerio.tr_node, 0) != 0)
+		if (!OpenTimerDevice((struct IORequest *)&timerio, &timermp, task))
 		{
-			if (timermp.mp_SigBit != SIGB_TIMER_FALLBACK)
-				FreeSignal(timermp.mp_SigBit);
-
+			CloseTimerDevice((struct IORequest *)&timerio);
 			return EINVAL;
 		}
 
@@ -765,6 +775,11 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 			// GetSysTime can't be used due to the timezone offset in abstime
 			gettimeofday(&starttime, NULL);
 			timersub(&timerio.tr_time, &starttime, &timerio.tr_time);
+			if (!timerisset(&timerio.tr_time))
+			{
+				CloseTimerDevice((struct IORequest *)&timerio);
+				return ETIMEDOUT;
+			}
 		}
 		timermask = 1 << timermp.mp_SigBit;
 		sigs |= timermask;
@@ -805,15 +820,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	if (abstime)
 	{
 		// clean up the timerequest
-		if (!CheckIO((struct IORequest *)&timerio))
-		{
-			AbortIO((struct IORequest *)&timerio);
-			WaitIO((struct IORequest *)&timerio);
-		}
-		CloseDevice((struct IORequest *)&timerio);
-
-		if (timermp.mp_SigBit != SIGB_TIMER_FALLBACK)
-			FreeSignal(timermp.mp_SigBit);
+		CloseTimerDevice((struct IORequest *)&timerio);
 
 		// did we timeout?
 		if (sigs & timermask)
@@ -1088,11 +1095,11 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *lock)
 		pthread_rwlock_init(lock, NULL);
 
 	// "Results are undefined if the calling thread holds a write lock on rwlock at the time the call is made."
-#if !defined(__MORPHOS__) && !defined(__AMIGA__)
+	/*
 	// we might already have a write lock
 	if (SemaphoreIsMine(&lock->semaphore))
 		return EDEADLK;
-#endif
+	*/
 
 	ObtainSemaphoreShared(&lock->semaphore);
 
@@ -1101,7 +1108,6 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *lock)
 
 int pthread_rwlock_timedrdlock(pthread_rwlock_t *lock, const struct timespec *abstime)
 {
-	struct timeval end, now;
 	int result;
 
 	D(bug("%s(%p, %p)\n", __FUNCTION__, lock, abstime));
@@ -1116,26 +1122,11 @@ int pthread_rwlock_timedrdlock(pthread_rwlock_t *lock, const struct timespec *ab
 
 	pthread_testcancel();
 
-	TIMESPEC_TO_TIMEVAL(&end, abstime);
-
-#if defined(__MORPHOS__) || defined(__AMIGA__)
 	result = pthread_rwlock_tryrdlock(lock);
 	if (result != EBUSY)
 		return result;
 
-	return _obtain_sema_timed(&lock->semaphore, &end, 1);
-#else
-	// busy waiting is not very nice, but ObtainSemaphore doesn't support timeouts
-	while ((result = pthread_rwlock_tryrdlock(lock)) == EBUSY)
-	{
-		sched_yield();
-		gettimeofday(&now, NULL);
-		if (timercmp(&end, &now, <))
-			return ETIMEDOUT;
-	}
-
-	return result;
-#endif
+	return _obtain_sema_timed(&lock->semaphore, abstime, SM_SHARED);
 }
 
 int pthread_rwlock_wrlock(pthread_rwlock_t *lock)
@@ -1161,7 +1152,6 @@ int pthread_rwlock_wrlock(pthread_rwlock_t *lock)
 
 int pthread_rwlock_timedwrlock(pthread_rwlock_t *lock, const struct timespec *abstime)
 {
-	struct timeval end, now;
 	int result;
 
 	D(bug("%s(%p, %p)\n", __FUNCTION__, lock, abstime));
@@ -1176,26 +1166,11 @@ int pthread_rwlock_timedwrlock(pthread_rwlock_t *lock, const struct timespec *ab
 
 	pthread_testcancel();
 
-	TIMESPEC_TO_TIMEVAL(&end, abstime);
-
-#if defined(__MORPHOS__) || defined(__AMIGA__)
 	result = pthread_rwlock_trywrlock(lock);
 	if (result != EBUSY)
 		return result;
 
-	return _obtain_sema_timed(&lock->semaphore, &end, 0);
-#else
-	// busy waiting is not very nice, but ObtainSemaphore doesn't support timeouts
-	while ((result = pthread_rwlock_trywrlock(lock)) == EBUSY)
-	{
-		sched_yield();
-		gettimeofday(&now, NULL);
-		if (timercmp(&end, &now, <))
-			return ETIMEDOUT;
-	}
-
-	return result;
-#endif
+	return _obtain_sema_timed(&lock->semaphore, abstime, SM_EXCLUSIVE);
 }
 
 int pthread_rwlock_unlock(pthread_rwlock_t *lock)
@@ -1309,11 +1284,9 @@ int pthread_attr_init(pthread_attr_t *attr)
 
 	memset(attr, 0, sizeof(pthread_attr_t));
 	// inherit the priority and stack size of the parent thread
-#ifdef __AMIGA__
-    task = SysBase->ThisTask;
-#else
-	task = FindTask(NULL);
-#endif
+
+	task = GET_THIS_TASK;
+
 	attr->param.sched_priority = task->tc_Node.ln_Pri;
 #ifdef __MORPHOS__
 	NewGetTaskAttrs(task, &attr->stacksize68k, sizeof(attr->stacksize68k), TASKINFOTYPE_STACKSIZE_M68K, TAG_DONE);
@@ -1452,7 +1425,7 @@ AROS_UFH3S(ULONG, CancelHandler,
 	AROS_UFHA(APTR, data, A1),
 	AROS_UFHA(struct ExecBase *, SysBase, A6))
 {
-    AROS_USERFUNC_INIT
+	AROS_USERFUNC_INIT
 #endif
 
 	DB2(bug("%s(%u, %p, %p)\n", __FUNCTION__, signals, data, SysBase));
@@ -1461,7 +1434,7 @@ AROS_UFH3S(ULONG, CancelHandler,
 
 	return signals;
 #ifdef __AROS__
-    AROS_USERFUNC_EXIT
+	AROS_USERFUNC_EXIT
 #endif
 }
 #endif
@@ -1477,10 +1450,10 @@ static void StarterFunc(void)
 
 	DB2(bug("%s()\n", __FUNCTION__));
 
-#ifdef __AMIGA__
-    struct Process * proc = (struct Process *)SysBase->ThisTask;
-    inf = (ThreadInfo *)proc->pr_CIS;
-    proc->pr_CIS = 0;
+#if defined(__AMIGA__) && !defined(__MORPHOS__)
+	struct Process * proc = (struct Process *)SysBase->ThisTask;
+	inf = (ThreadInfo *)proc->pr_CIS;
+	proc->pr_CIS = 0;
 #else
 	inf = (ThreadInfo *)FindTask(NULL)->tc_UserData;
 #endif
@@ -1507,15 +1480,15 @@ static void StarterFunc(void)
 		// custom stack requires special handling
 		if (inf->attr.stackaddr != NULL && inf->attr.stacksize > 0)
 		{
-#ifdef __AMIGA__
-            struct StackSwapStruct stack;
-            stack.stk_Lower = inf->attr.stackaddr;
-            stack.stk_Upper = (ULONG)((char *)stack.stk_Lower + inf->attr.stacksize);
-            stack.stk_Pointer = (APTR)stack.stk_Upper;
+#if defined(__AMIGA__) && !defined(__MORPHOS__)
+			struct StackSwapStruct stack;
+			stack.stk_Lower = inf->attr.stackaddr;
+			stack.stk_Upper = (ULONG)((char *)stack.stk_Lower + inf->attr.stacksize);
+			stack.stk_Pointer = (APTR)stack.stk_Upper;
 
-            StackSwap(&stack);
+			StackSwap(&stack);
 
-            inf->ret = inf->start(inf->arg);
+			inf->ret = inf->start(inf->arg);
 #else
 			struct StackSwapArgs swapargs;
 			struct StackSwapStruct stack;
@@ -1607,11 +1580,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 	memset(inf, 0, sizeof(ThreadInfo));
 	inf->start = start;
 	inf->arg = arg;
-#ifdef __AMIGA__
-    inf->parent = SysBase->ThisTask;
-#else
-	inf->parent = FindTask(NULL);
-#endif
+	inf->parent = GET_THIS_TASK;
 	if (attr)
 		inf->attr = *attr;
 	else
@@ -1636,15 +1605,15 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
 #else
 		(inf->attr.stackaddr == NULL && inf->attr.stacksize > 0) ? NP_StackSize : TAG_IGNORE, inf->attr.stacksize,
 #endif
-#ifdef __AMIGA__
+#if defined(__AMIGA__) && !defined(__MORPHOS__)
 		NP_Input, (IPTR)inf,
 #else
 		NP_UserData, inf,
 #endif
-        NP_Name, (IPTR)name,
+		NP_Name, (IPTR)name,
 		TAG_DONE);
 
-    ReleaseSemaphore(&thread_sem);
+	ReleaseSemaphore(&thread_sem);
 
 	if (!inf->task)
 	{
@@ -1719,11 +1688,7 @@ pthread_t pthread_self(void)
 
 	D(bug("%s()\n", __FUNCTION__));
 
-#ifdef __AMIGA__
-    task = SysBase->ThisTask;
-#else
-	task = FindTask(NULL);
-#endif
+	task = GET_THIS_TASK;
 
 	thread = GetThreadId(task);
 
@@ -1751,11 +1716,7 @@ int pthread_cancel(pthread_t thread)
 	{
 		struct Task *task;
 
-#ifdef __AMIGA__
-        task = SysBase->ThisTask;
-#else
-		task = FindTask(NULL);
-#endif
+		task = GET_THIS_TASK;
 
 		if (inf->task == task)
 			pthread_testcancel(); // cancel ourselves
@@ -1956,7 +1917,7 @@ int pthread_setname_np(pthread_t thread, const char *name)
 	if (inf == NULL)
 		return ERANGE;
 
-    currentname = inf->task->tc_Node.ln_Name;
+	currentname = inf->task->tc_Node.ln_Name;
 
 	if (inf->parent == NULL)
 		namelen = strlen(currentname) + 1;
@@ -1986,7 +1947,7 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len)
 	if (inf == NULL)
 		return ERANGE;
 
-    currentname = inf->task->tc_Node.ln_Name;
+	currentname = inf->task->tc_Node.ln_Name;
 
 	if (strlen(currentname) + 1 > len)
 		return ERANGE;
@@ -2077,37 +2038,23 @@ int pthread_kill(pthread_t thread, int sig)
 // Constructors, destructors
 //
 
-#ifndef __AMIGA__
-static
-#endif
 int __pthread_Init_Func(void)
 {
 	DB2(bug("%s()\n", __FUNCTION__));
 
-#ifdef __MORPHOS__
-	memset(&waitutc, 0, sizeof(waitutc));
-	if (OpenDevice("timer.device", UNIT_WAITUTC, (APTR) &waitutc, 0) != 0)
-		return FALSE;
-#endif
 	//memset(&threads, 0, sizeof(threads));
 	InitSemaphore(&thread_sem);
 	InitSemaphore(&tls_sem);
 
 	// reserve ID 0 for the main thread
 	ThreadInfo *inf = &threads[0];
-#ifdef __AMIGA__
-    inf->task = SysBase->ThisTask;
-#else
-    inf->task = FindTask(NULL);
-#endif
+
+	inf->task = GET_THIS_TASK;
 
 	NEWLIST((struct List *)&inf->cleanup);
 	return TRUE;
 }
 
-#ifndef __AMIGA__
-static
-#endif
 void __pthread_Exit_Func(void)
 {
 	pthread_t i;
@@ -2131,13 +2078,9 @@ void __pthread_Exit_Func(void)
 			pthread_join(i, NULL);
 		}
 	}
-
-#ifdef __MORPHOS__
-	CloseDevice((APTR) &waitutc);
-#endif
 }
 
-#if defined(__MORPHOS__) || defined(__AMIGA__)
+#if defined(__AROS__) || (defined(__AMIGA__) && !defined(__MORPHOS__))
 ADD2INIT(__pthread_Init_Func, 0);
 ADD2EXIT(__pthread_Exit_Func, 0);
 #else
