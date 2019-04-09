@@ -611,8 +611,14 @@ int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *absti
 		return EINVAL;
 
 	result = pthread_mutex_trylock(mutex);
-	if (result != EBUSY)
-		return result;
+	if (result != 0)
+	{
+		// pthread_mutex_trylock returns EBUSY when a deadlock would occur
+		if (result != EBUSY)
+			return result;
+		else if (mutex->kind != PTHREAD_MUTEX_RECURSIVE && SemaphoreIsMine(&mutex->semaphore))
+			return EDEADLK;
+	}
 
 	return _obtain_sema_timed(&mutex->semaphore, abstime, SM_EXCLUSIVE);
 }
@@ -631,7 +637,7 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
 		_pthread_mutex_init(mutex, NULL, TRUE);
 
 	if (mutex->kind != PTHREAD_MUTEX_RECURSIVE && SemaphoreIsMine(&mutex->semaphore))
-		return EDEADLK;
+		return EBUSY;
 
 	ret = AttemptSemaphore(&mutex->semaphore);
 
