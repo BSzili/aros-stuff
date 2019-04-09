@@ -153,11 +153,11 @@ struct pthread_mutex
 
 typedef struct pthread_mutex pthread_mutex_t;
 
-//#ifndef __AROS__
+#ifndef __AROS__
 #define NULL_MINLIST {0, 0, 0}
-//#else
-//#define NULL_MINLIST {0, 0, {0}}
-//#endif
+#else
+#define NULL_MINLIST {0, 0, {0}}
+#endif
 #define NULL_MINNODE {0, 0}
 #define NULL_NODE {0, 0, 0, 0, 0}
 #define NULL_SEMAPHOREREQUEST {NULL_MINNODE, 0}
