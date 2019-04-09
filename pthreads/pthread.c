@@ -89,7 +89,7 @@ typedef struct
 {
 	struct MinNode node;
 	struct Task *task;
-	ULONG sigmask;
+	UBYTE sigbit;
 } CondWaiter;
 
 typedef struct
@@ -494,28 +494,32 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex)
 
 int pthread_mutex_lock(pthread_mutex_t *mutex)
 {
+	struct SignalSemaphore *sem;
+
 	D(bug("%s(%p)\n", __FUNCTION__, mutex));
 
 	if (mutex == NULL)
 		return EINVAL;
 
-	struct SignalSemaphore * sigSem = &mutex->semaphore;
+	sem = &mutex->semaphore;
 
 	// initialize static mutexes
-	if (SemaphoreIsInvalid(sigSem))
+	if (SemaphoreIsInvalid(sem))
 		_pthread_mutex_init(mutex, NULL, TRUE);
 
 	// normal mutexes would simply deadlock here
-	if (mutex->kind == PTHREAD_MUTEX_ERRORCHECK && SemaphoreIsMine(sigSem))
+	if (mutex->kind == PTHREAD_MUTEX_ERRORCHECK && SemaphoreIsMine(sem))
 		return EDEADLK;
 
-	ObtainSemaphore(sigSem);
+	ObtainSemaphore(sem);
 
-	if (mutex->kind == PTHREAD_MUTEX_NORMAL && sigSem->ss_NestCount > 1) {
+#if 0 // let's just deadlock here, to be compatible with normal mutexes on other platforms
+	if (mutex->kind == PTHREAD_MUTEX_NORMAL && sem->ss_NestCount > 1) {
 		// should have blocked - fix this
-		ReleaseSemaphore(sigSem);
+		ReleaseSemaphore(sem);
 		return EDEADLK;
 	}
+#endif
 
 	return 0;
 }
@@ -742,8 +746,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 {
 	CondWaiter waiter;
 	BYTE signal;
-	ULONG sigs = 0;
-	ULONG timermask = 0;
+	ULONG sigs = SIGBREAKF_CTRL_C;
 	struct MsgPort timermp;
 	struct timerequest timerio;
 	struct Task *task;
@@ -752,8 +755,6 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 
 	if (cond == NULL || mutex == NULL)
 		return EINVAL;
-
-	pthread_testcancel();
 
 	// initialize static conditions
 	if (SemaphoreIsInvalid(&cond->semaphore))
@@ -787,8 +788,7 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 				return ETIMEDOUT;
 			}
 		}
-		timermask = 1 << timermp.mp_SigBit;
-		sigs |= timermask;
+		sigs |= (1 << timermp.mp_SigBit);
 		SendIO((struct IORequest *)&timerio);
 	}
 
@@ -800,8 +800,8 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 		signal = SIGB_COND_FALLBACK;
 		SetSignal(SIGF_COND_FALLBACK, 0);
 	}
-	waiter.sigmask = 1 << signal;
-	sigs |= waiter.sigmask;
+	waiter.sigbit = signal;
+	sigs |= 1 << waiter.sigbit;
 
 	// add it to the end of the list
 	ObtainSemaphore(&cond->semaphore);
@@ -820,8 +820,8 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	Remove((struct Node *)&waiter);
 	ReleaseSemaphore(&cond->semaphore);
 
-	if (signal != SIGB_COND_FALLBACK)
-		FreeSignal(signal);
+	if (waiter.sigbit != SIGB_COND_FALLBACK)
+		FreeSignal(waiter.sigbit);
 
 	if (abstime)
 	{
@@ -829,8 +829,15 @@ static int _pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 		CloseTimerDevice((struct IORequest *)&timerio);
 
 		// did we timeout?
-		if (sigs & timermask)
+		if (sigs & (1 << timermp.mp_SigBit))
 			return ETIMEDOUT;
+		else if (sigs & SIGBREAKF_CTRL_C)
+			pthread_testcancel();
+	}
+	else
+	{
+		if (sigs & SIGBREAKF_CTRL_C)
+			pthread_testcancel();
 	}
 
 	return 0;
@@ -874,7 +881,7 @@ static int _pthread_cond_broadcast(pthread_cond_t *cond, BOOL onlyfirst)
 	ObtainSemaphore(&cond->semaphore);
 	ForeachNode(&cond->waiters, waiter)
 	{
-		Signal(waiter->task, waiter->sigmask);
+		Signal(waiter->task, 1 << waiter->sigbit);
 		if (onlyfirst) break;
 	}
 	ReleaseSemaphore(&cond->semaphore);
@@ -1729,6 +1736,11 @@ int pthread_cancel(pthread_t thread)
 		else
 			Signal(inf->task, SIGBREAKF_CTRL_C); // trigger the exception handler 
 	}
+	else
+	{
+		// for the timed waits
+		Signal(inf->task, SIGBREAKF_CTRL_C);
+	}
 
 	return 0;
 }
@@ -1787,6 +1799,8 @@ void pthread_testcancel(void)
 
 	if (inf->canceled && (inf->cancelstate == PTHREAD_CANCEL_ENABLE))
 		pthread_exit(PTHREAD_CANCELED);
+
+	SetSignal(SIGBREAKF_CTRL_C, 0);
 }
 
 void pthread_exit(void *value_ptr)
