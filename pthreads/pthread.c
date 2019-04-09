@@ -528,9 +528,14 @@ static int _obtain_sema_timed(struct SignalSemaphore *sema, const struct timespe
 {
 	struct MsgPort msgport;
 	struct SemaphoreMessage msg;
-	struct Message *m1, *m2;
 	struct timerequest timerio;
-	struct Task * task;
+	struct Task *task;
+#if defined(__AMIGA__) && !defined(__MORPHOS__)
+	struct SemaphoreRequest sr;
+	ULONG sigmask, sigs;
+#else
+	struct Message *m1, *m2;
+#endif
 
 	DB2(bug("%s(%p, %p, %d)\n", __FUNCTION__, sema, abstime, shared));
 
@@ -558,32 +563,28 @@ static int _obtain_sema_timed(struct SignalSemaphore *sema, const struct timespe
 			return ETIMEDOUT;
 		}
 	}
+	SendIO((struct IORequest *)&timerio);
 
 #if defined(__AMIGA__) && !defined(__MORPHOS__)
 	// Procure is broken on older systems... hand made...
-	struct SemaphoreRequest sr;
-	sr.sr_Waiter = task;
+	sr.sr_Waiter = (struct Task *)((IPTR)task | shared);
 
-	SendIO((struct IORequest *)&timerio);
-
-	ULONG mask = SIGF_SINGLE | (1<<msgport.mp_SigBit);
+	sigmask = SIGF_SINGLE | (1<<msgport.mp_SigBit);
 	Forbid();
-	task->tc_SigRecvd &= ~mask;
+	task->tc_SigRecvd &= ~sigmask;
 	AddTail((struct List *)&sema->ss_WaitQueue, (struct Node *)&sr.sr_Link);
-	ULONG signal = Wait(mask);
+	sigs = Wait(sigmask);
 	Permit();
 
-	if (signal & SIGF_SINGLE)
+	if (sigs & SIGF_SINGLE)
 		msg.ssm_Semaphore = sema;
 	else
-		msg.ssm_Semaphore = 0;
+		msg.ssm_Semaphore = NULL;
 #else
 	msg.ssm_Message.mn_Node.ln_Type = NT_MESSAGE;
 	msg.ssm_Message.mn_Node.ln_Name = (char *)shared;
 	msg.ssm_Message.mn_ReplyPort = &msgport;
-
 	Procure(sema, &msg);
-	SendIO((struct IORequest *)&timerio);
 
 	WaitPort(&msgport);
 	m1 = GetMsg(&msgport);
@@ -594,7 +595,7 @@ static int _obtain_sema_timed(struct SignalSemaphore *sema, const struct timespe
 
 	CloseTimerDevice((struct IORequest *)&timerio);
 
-	if (msg.ssm_Semaphore == 0)
+	if (msg.ssm_Semaphore == NULL)
 		return ETIMEDOUT;
 
 	return 0;
